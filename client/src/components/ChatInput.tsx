@@ -1,0 +1,82 @@
+import { Send, Sparkles } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+
+interface ChatInputProps {
+  onSend: (message: string) => void;
+  isLoading: boolean;
+}
+
+export function ChatInput({ onSend, isLoading }: ChatInputProps) {
+  const [input, setInput] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!input.trim() || isLoading) return;
+    onSend(input);
+    setInput("");
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+    }
+  }, [input]);
+
+  return (
+    <div className="relative max-w-4xl mx-auto w-full p-4">
+      <form
+        onSubmit={handleSubmit}
+        className={`
+          relative flex items-end gap-2 p-2 rounded-2xl border bg-background/80 backdrop-blur-xl shadow-lg transition-all duration-300
+          ${isLoading ? 'border-primary/20 shadow-primary/5 cursor-wait' : 'border-border focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10 focus-within:shadow-xl'}
+        `}
+      >
+        <div className="flex-1 min-w-0 relative">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading}
+            placeholder="Ask a question about your data..."
+            className="w-full px-4 py-3 max-h-[120px] bg-transparent border-none text-foreground placeholder:text-muted-foreground focus:ring-0 resize-none font-medium leading-relaxed"
+            rows={1}
+          />
+        </div>
+        
+        <button
+          type="submit"
+          disabled={!input.trim() || isLoading}
+          className={`
+            mb-1 p-3 rounded-xl flex items-center justify-center transition-all duration-200
+            ${!input.trim() || isLoading 
+              ? 'bg-muted text-muted-foreground cursor-not-allowed' 
+              : 'bg-primary text-primary-foreground shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0'
+            }
+          `}
+        >
+          {isLoading ? (
+            <Sparkles className="w-5 h-5 animate-spin" />
+          ) : (
+            <Send className="w-5 h-5" />
+          )}
+        </button>
+      </form>
+      <div className="mt-2 text-center">
+        <p className="text-xs text-muted-foreground">
+          AI generated SQL queries. Always verify results before making business decisions.
+        </p>
+      </div>
+    </div>
+  );
+}
