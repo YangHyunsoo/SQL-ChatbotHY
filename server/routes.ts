@@ -73,7 +73,7 @@ Rules:
       } catch (dbError: any) {
         console.error("Database execution error:", dbError);
         return res.status(200).json({
-          answer: "I couldn't execute the query. Please verify your question.",
+          answer: "쿼리를 실행할 수 없습니다. 질문을 다시 확인해 주세요.",
           sql: generatedSql,
           data: [],
           error: dbError.message
@@ -82,25 +82,25 @@ Rules:
 
       // 3. Generate Natural Language Answer
       const summaryPrompt = `
-User Question: "${message}"
-SQL Query Executed: "${generatedSql}"
-Data Returned: ${JSON.stringify(queryResult.slice(0, 10))} ${(queryResult.length > 10 ? "...(more rows)" : "")}
+사용자 질문: "${message}"
+실행된 SQL 쿼리: "${generatedSql}"
+반환된 데이터: ${JSON.stringify(queryResult.slice(0, 10))} ${(queryResult.length > 10 ? "...(추가 행 있음)" : "")}
 
-Task: Provide a concise, friendly answer to the user's question based on the data returned. 
-If the data is empty, say so politely.
-Do not mention the SQL or technical details in the answer, just the facts.
+작업: 반환된 데이터를 기반으로 사용자의 질문에 간결하고 친근하게 한국어로 답변해 주세요.
+데이터가 비어 있으면 정중하게 알려주세요.
+SQL이나 기술적인 세부 사항은 언급하지 말고 사실만 전달하세요.
 `;
 
       const summaryCompletion = await openai.chat.completions.create({
         model: MODEL,
         messages: [
-          { role: "system", content: "You are a helpful data assistant. Be brief." },
+          { role: "system", content: "당신은 친절한 데이터 어시스턴트입니다. 간결하게 한국어로 답변하세요." },
           { role: "user", content: summaryPrompt },
         ],
         max_tokens: 512, // Limit tokens for faster response
       });
 
-      const answer = summaryCompletion.choices[0]?.message?.content || "Here are the results.";
+      const answer = summaryCompletion.choices[0]?.message?.content || "결과입니다.";
 
       res.json({
         answer,

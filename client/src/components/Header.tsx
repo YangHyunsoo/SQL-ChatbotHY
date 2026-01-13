@@ -11,10 +11,10 @@ export function Header() {
           </div>
           <div className="flex flex-col">
             <span className="font-display font-bold text-lg leading-tight text-foreground">
-              DataPilot
+              SQL 챗봇
             </span>
             <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-              SQL Assistant <Zap className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+              데이터 어시스턴트 <Zap className="w-3 h-3 text-yellow-500 fill-yellow-500" />
             </span>
           </div>
         </div>
@@ -22,7 +22,7 @@ export function Header() {
         <div className="flex items-center gap-4">
           <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border/50">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-xs font-medium text-muted-foreground">System Operational</span>
+            <span className="text-xs font-medium text-muted-foreground">시스템 정상 작동 중</span>
           </div>
         </div>
       </div>

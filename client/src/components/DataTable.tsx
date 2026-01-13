@@ -8,7 +8,7 @@ export function DataTable({ data }: DataTableProps) {
   if (!data || data.length === 0) {
     return (
       <div className="p-6 text-center border border-border border-dashed rounded-xl bg-muted/10 text-muted-foreground italic">
-        No data returned from query
+        쿼리 결과가 없습니다
       </div>
     );
   }
@@ -48,7 +48,7 @@ export function DataTable({ data }: DataTableProps) {
         </table>
       </div>
       <div className="px-4 py-2 bg-muted/10 border-t border-border/50 text-xs text-muted-foreground text-right">
-        {data.length} row{data.length !== 1 && 's'} returned
+        {data.length}개 행 반환됨
       </div>
     </div>
   );

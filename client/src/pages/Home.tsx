@@ -12,7 +12,7 @@ export default function Home() {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hello! I'm your SQL data assistant. I can help you analyze your products and sales data. Try asking me something like \"What are the top selling products?\" or \"Show me sales from last week.\"",
+      content: "안녕하세요! 저는 SQL 데이터 어시스턴트입니다. 제품 및 판매 데이터를 분석하는 데 도움을 드릴 수 있습니다. \"가장 많이 팔린 제품은?\" 또는 \"이번 주 판매량을 보여줘\"와 같은 질문을 해보세요.",
       timestamp: new Date()
     }
   ]);
@@ -47,7 +47,7 @@ export default function Home() {
         const errorMessage: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: "Sorry, I encountered an error processing your request.",
+          content: "죄송합니다, 요청을 처리하는 중 오류가 발생했습니다.",
           error: error.message,
           timestamp: new Date()
         };
@@ -62,10 +62,10 @@ export default function Home() {
   }, [messages, chatMutation.isPending]);
 
   const sampleQueries = [
-    "Show me the top 5 most expensive products",
-    "What is the total revenue for each category?",
-    "List all sales from the last 7 days",
-    "Which products have low stock (< 20)?"
+    "가장 비싼 상위 5개 제품을 보여줘",
+    "카테고리별 총 매출은 얼마야?",
+    "최근 7일간의 모든 판매 내역을 보여줘",
+    "재고가 20개 미만인 제품은?"
   ];
 
   return (
@@ -111,7 +111,7 @@ export default function Home() {
                           <div className="flex items-start gap-3 p-4 rounded-xl bg-destructive/5 border border-destructive/20 text-destructive text-sm">
                             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                             <div className="flex flex-col gap-1">
-                              <span className="font-semibold">Error processing query</span>
+                              <span className="font-semibold">쿼리 처리 오류</span>
                               <span className="opacity-90">{msg.error}</span>
                             </div>
                           </div>
@@ -163,7 +163,7 @@ export default function Home() {
                     <span className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
                     <span className="w-2 h-2 rounded-full bg-primary animate-bounce" />
                   </div>
-                  <span className="text-xs text-muted-foreground animate-pulse ml-1">Analyzing database schema...</span>
+                  <span className="text-xs text-muted-foreground animate-pulse ml-1">데이터베이스 분석 중...</span>
                 </div>
               </motion.div>
             )}
@@ -183,7 +183,7 @@ export default function Home() {
                       <Terminal className="w-5 h-5" />
                     </div>
                     <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors block mb-1">
-                      Query Suggestion
+                      추천 질문
                     </span>
                     <span className="text-sm text-muted-foreground group-hover:text-foreground/80 transition-colors">
                       "{query}"

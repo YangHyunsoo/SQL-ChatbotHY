@@ -48,7 +48,7 @@ export function ChatInput({ onSend, isLoading }: ChatInputProps) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
-            placeholder="Ask a question about your data..."
+            placeholder="데이터에 대해 질문해 보세요..."
             className="w-full px-4 py-3 max-h-[120px] bg-transparent border-none text-foreground placeholder:text-muted-foreground focus:ring-0 resize-none font-medium leading-relaxed"
             rows={1}
           />
@@ -74,7 +74,7 @@ export function ChatInput({ onSend, isLoading }: ChatInputProps) {
       </form>
       <div className="mt-2 text-center">
         <p className="text-xs text-muted-foreground">
-          AI generated SQL queries. Always verify results before making business decisions.
+          AI가 생성한 SQL 쿼리입니다. 비즈니스 결정을 내리기 전에 결과를 확인하세요.
         </p>
       </div>
     </div>
