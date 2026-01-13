@@ -12,7 +12,7 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL,
 });
 
-const MODEL = "mistralai/mistral-small-24b-instruct-2501"; // Or generic "mistralai/mistral-7b-instruct"
+const MODEL = "mistralai/mistral-7b-instruct:free"; // Lightweight free model for low-spec systems
 
 export async function registerRoutes(
   httpServer: Server,
@@ -54,7 +54,8 @@ Rules:
           { role: "system", content: systemPrompt },
           { role: "user", content: message },
         ],
-        temperature: 0, // Low temperature for deterministic code generation
+        temperature: 0,
+        max_tokens: 256, // Limit tokens for faster response
       });
 
       let generatedSql = completion.choices[0]?.message?.content || "";
@@ -93,9 +94,10 @@ Do not mention the SQL or technical details in the answer, just the facts.
       const summaryCompletion = await openai.chat.completions.create({
         model: MODEL,
         messages: [
-          { role: "system", content: "You are a helpful data assistant." },
+          { role: "system", content: "You are a helpful data assistant. Be brief." },
           { role: "user", content: summaryPrompt },
         ],
+        max_tokens: 512, // Limit tokens for faster response
       });
 
       const answer = summaryCompletion.choices[0]?.message?.content || "Here are the results.";
