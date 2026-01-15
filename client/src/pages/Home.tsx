@@ -8,8 +8,7 @@ import { DataTable } from "@/components/DataTable";
 import { SettingsPage } from "@/components/SettingsPage";
 import { DatabasePage } from "@/components/DatabasePage";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bot, User, AlertCircle, Sparkles, Terminal, LayoutDashboard, Workflow, Lightbulb } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Bot, User, AlertCircle, Sparkles, Terminal } from "lucide-react";
 
 const STORAGE_KEY = 'sqlchat_history_v2';
 const MAX_CONVERSATIONS = 20;
@@ -35,6 +34,7 @@ export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('chat');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('theme');
@@ -302,8 +302,8 @@ export default function Home() {
 
   const renderChatContent = () => (
     <div className="flex-1 flex flex-col relative">
-      <div className="flex-1 px-4 py-8 overflow-y-auto">
-        <div className="space-y-8 pb-32 max-w-4xl mx-auto">
+      <div className="flex-1 px-2 sm:px-4 py-4 sm:py-8 overflow-y-auto">
+        <div className="space-y-4 sm:space-y-8 pb-32 max-w-4xl mx-auto">
           <AnimatePresence mode="popLayout">
             {messages.map((msg) => (
               <motion.div
@@ -322,9 +322,9 @@ export default function Home() {
                   {msg.role === 'assistant' ? <Bot className="w-6 h-6" /> : <User className="w-6 h-6" />}
                 </div>
 
-                <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div className={`flex flex-col gap-2 max-w-[90%] sm:max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div className={`
-                    px-5 py-3.5 rounded-2xl shadow-sm text-sm leading-relaxed
+                    px-3 sm:px-5 py-2.5 sm:py-3.5 rounded-2xl shadow-sm text-sm leading-relaxed
                     ${msg.role === 'user' 
                       ? 'bg-white dark:bg-card text-foreground border border-border rounded-tr-none' 
                       : 'bg-card border border-border/50 text-foreground rounded-tl-none'}
@@ -400,7 +400,7 @@ export default function Home() {
           <div ref={bottomRef} />
           
           {messages.length <= 1 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8 px-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4 sm:mt-8 px-1 sm:px-4">
               {sampleQueries.map((query, i) => (
                 <button
                   key={i}
@@ -424,33 +424,11 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="sticky bottom-0 w-full bg-gradient-to-t from-background via-background to-transparent pt-10 pb-4 px-4 z-40">
+      <div className="sticky bottom-0 w-full bg-gradient-to-t from-background via-background to-transparent pt-6 sm:pt-10 pb-3 sm:pb-4 px-2 sm:px-4 z-40">
         <ChatInput onSend={handleSend} isLoading={chatMutation.isPending} />
       </div>
     </div>
   );
-
-  const renderPlaceholderTab = (title: string, icon: typeof LayoutDashboard) => {
-    const Icon = icon;
-    return (
-      <div className="p-6 flex items-center justify-center h-full">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Icon className="w-5 h-5" />
-              {title}
-            </CardTitle>
-            <CardDescription>이 기능은 준비 중입니다</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              향후 업데이트에서 이 기능이 추가될 예정입니다.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -460,12 +438,6 @@ export default function Home() {
         return <DatabasePage />;
       case 'settings':
         return <SettingsPage settings={settings} onSettingsChange={setSettings} />;
-      case 'dashboard':
-        return renderPlaceholderTab('대시보드', LayoutDashboard);
-      case 'workflow':
-        return renderPlaceholderTab('워크플로우', Workflow);
-      case 'insights':
-        return renderPlaceholderTab('인사이트', Lightbulb);
       default:
         return renderChatContent();
     }
@@ -494,10 +466,16 @@ export default function Home() {
         onFileUpload={handleFileUpload}
         isDarkMode={isDarkMode}
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <TopNav activeTab={activeTab} onTabChange={setActiveTab} />
+      <div className="flex-1 flex flex-col overflow-hidden lg:ml-0">
+        <TopNav 
+          activeTab={activeTab} 
+          onTabChange={setActiveTab}
+          onMenuClick={() => setIsSidebarOpen(true)}
+        />
         <main className="flex-1 overflow-hidden flex flex-col">
           {renderContent()}
         </main>
