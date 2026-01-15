@@ -22,6 +22,36 @@ export async function registerRoutes(
   // Initialize seed data
   await storage.seed();
 
+  // Get database tables info
+  app.get("/api/tables", async (req, res) => {
+    try {
+      const tables = [
+        {
+          name: "products",
+          columns: ["id", "name", "category", "price", "stock", "description"],
+          rowCount: 0
+        },
+        {
+          name: "sales",
+          columns: ["id", "product_id", "quantity", "total_price", "sale_date"],
+          rowCount: 0
+        }
+      ];
+
+      // Get row counts
+      const productsResult = await db.execute(sql.raw("SELECT COUNT(*) as count FROM products"));
+      const salesResult = await db.execute(sql.raw("SELECT COUNT(*) as count FROM sales"));
+      
+      tables[0].rowCount = Number(productsResult.rows[0]?.count || 0);
+      tables[1].rowCount = Number(salesResult.rows[0]?.count || 0);
+
+      res.json(tables);
+    } catch (err) {
+      console.error("Tables error:", err);
+      res.status(500).json({ message: "Failed to get tables" });
+    }
+  });
+
   app.post(api.chat.sql.path, async (req, res) => {
     try {
       const { message } = api.chat.sql.input.parse(req.body);
