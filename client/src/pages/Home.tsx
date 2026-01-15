@@ -11,9 +11,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Bot, User, AlertCircle, Sparkles, Terminal, LayoutDashboard, Workflow, Lightbulb } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-const STORAGE_KEY = 'sqlchat_history_v1';
+const STORAGE_KEY = 'sqlchat_history_v2';
 const MAX_CONVERSATIONS = 20;
 const MAX_MESSAGES = 80;
+
+interface StoredConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: Message[];
+}
 
 interface AppSettings {
   modelName: string;
@@ -23,10 +31,17 @@ interface AppSettings {
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [conversationMessages, setConversationMessages] = useState<Record<string, Message[]>>({});
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('chat');
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('theme');
+      return saved ? saved === 'dark' : true;
+    }
+    return true;
+  });
   const [settings, setSettings] = useState<AppSettings>({
     modelName: 'mistralai/mistral-7b-instruct:free',
     temperature: 0,
@@ -38,6 +53,13 @@ export default function Home() {
   const hasInitialized = useRef(false);
   const chatMutation = useChat();
 
+  const makeWelcomeMessage = (): Message => ({
+    id: "welcome",
+    role: "assistant",
+    content: "안녕하세요! 저는 SQL 데이터 어시스턴트입니다. 제품 및 판매 데이터를 분석하는 데 도움을 드릴 수 있습니다. \"가장 많이 팔린 제품은?\" 또는 \"이번 주 판매량을 보여줘\"와 같은 질문을 해보세요.",
+    timestamp: new Date()
+  });
+
   // Initialize from localStorage
   useEffect(() => {
     if (hasInitialized.current) return;
@@ -46,52 +68,84 @@ export default function Home() {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
-        const parsed = JSON.parse(stored);
+        const parsed: StoredConversation[] = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const restored = parsed.map((c: any) => ({
-            ...c,
+          const restored = parsed.map((c) => ({
+            id: c.id,
+            title: c.title,
             createdAt: new Date(c.createdAt),
             updatedAt: new Date(c.updatedAt)
           }));
+          
+          const msgMap: Record<string, Message[]> = {};
+          parsed.forEach((c) => {
+            msgMap[c.id] = (c.messages || []).map((m: any) => ({
+              ...m,
+              timestamp: new Date(m.timestamp)
+            }));
+          });
+          
           setConversations(restored);
+          setConversationMessages(msgMap);
           setActiveConversationId(restored[0].id);
-          setMessages(restored[0].messages || []);
+          const firstMsgs = msgMap[restored[0].id];
+          setMessages(firstMsgs && firstMsgs.length > 0 ? firstMsgs : [makeWelcomeMessage()]);
           return;
         }
       } catch (e) {
         localStorage.removeItem(STORAGE_KEY);
       }
     }
-    createConversation([getWelcomeMessage()]);
+    
+    // Create first conversation inline
+    const id = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const welcomeMsg = makeWelcomeMessage();
+    const newConv: Conversation = {
+      id,
+      title: '새 대화',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    setConversations([newConv]);
+    setConversationMessages({ [id]: [welcomeMsg] });
+    setActiveConversationId(id);
+    setMessages([welcomeMsg]);
   }, []);
 
-  // Save conversations to localStorage
+  // Save conversations to localStorage when they change
   useEffect(() => {
-    if (conversations.length === 0) return;
+    if (conversations.length === 0 || !activeConversationId) return;
     
-    const slimConversations = conversations.slice(0, MAX_CONVERSATIONS).map(c => ({
+    // Update the current conversation's messages in the map
+    const updatedMsgMap = {
+      ...conversationMessages,
+      [activeConversationId]: messages.slice(-MAX_MESSAGES)
+    };
+    
+    const toStore: StoredConversation[] = conversations.slice(0, MAX_CONVERSATIONS).map(c => ({
       id: c.id,
       title: c.title,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-      messages: (messages.filter(() => c.id === activeConversationId) || [])
-        .slice(-MAX_MESSAGES)
-        .map(m => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          timestamp: m.timestamp
-        }))
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+      messages: (updatedMsgMap[c.id] || []).slice(-MAX_MESSAGES).map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp,
+        sql: m.sql,
+        data: undefined, // Don't store data to save space
+        error: m.error
+      }))
     }));
 
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(slimConversations));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
     } catch (e) {
       localStorage.removeItem(STORAGE_KEY);
     }
-  }, [conversations, messages, activeConversationId]);
+  }, [conversations, messages, activeConversationId, conversationMessages]);
 
-  // Update conversation when messages change
+  // Update conversation title when messages change
   useEffect(() => {
     if (!activeConversationId || messages.length === 0) return;
     
@@ -104,6 +158,8 @@ export default function Home() {
         ? firstUserMsg.content.slice(0, 24)
         : existing.title;
       
+      if (newTitle === existing.title) return prev;
+      
       return prev.map(c => 
         c.id === activeConversationId 
           ? { ...c, title: newTitle, updatedAt: new Date() }
@@ -112,9 +168,10 @@ export default function Home() {
     });
   }, [messages, activeConversationId]);
 
-  // Theme toggle
+  // Theme toggle with persistence
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDarkMode);
+    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
   }, [isDarkMode]);
 
   // Scroll to bottom on new messages
@@ -122,26 +179,31 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, chatMutation.isPending]);
 
-  function getWelcomeMessage(): Message {
-    return {
-      id: "welcome",
-      role: "assistant",
-      content: "안녕하세요! 저는 SQL 데이터 어시스턴트입니다. 제품 및 판매 데이터를 분석하는 데 도움을 드릴 수 있습니다. \"가장 많이 팔린 제품은?\" 또는 \"이번 주 판매량을 보여줘\"와 같은 질문을 해보세요.",
-      timestamp: new Date()
-    };
-  }
-
-  function createConversation(seedMessages: Message[] = []) {
+  function createNewConversation() {
+    // Save current messages to the map before switching
+    if (activeConversationId && messages.length > 0) {
+      setConversationMessages(prev => ({
+        ...prev,
+        [activeConversationId]: messages
+      }));
+    }
+    
     const id = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const welcomeMsg = makeWelcomeMessage();
     const newConv: Conversation = {
       id,
       title: '새 대화',
       createdAt: new Date(),
       updatedAt: new Date()
     };
+    
     setConversations(prev => [newConv, ...prev]);
+    setConversationMessages(prev => ({
+      ...prev,
+      [id]: [welcomeMsg]
+    }));
     setActiveConversationId(id);
-    setMessages(seedMessages.length > 0 ? seedMessages : [getWelcomeMessage()]);
+    setMessages([welcomeMsg]);
   }
 
   const handleSend = (content: string) => {
@@ -181,10 +243,22 @@ export default function Home() {
   };
 
   const handleSelectConversation = (id: string) => {
+    if (id === activeConversationId) return;
+    
+    // Save current messages before switching
+    if (activeConversationId && messages.length > 0) {
+      setConversationMessages(prev => ({
+        ...prev,
+        [activeConversationId]: messages
+      }));
+    }
+    
     const conv = conversations.find(c => c.id === id);
     if (!conv) return;
+    
     setActiveConversationId(id);
-    setMessages([getWelcomeMessage()]);
+    const storedMessages = conversationMessages[id];
+    setMessages(storedMessages && storedMessages.length > 0 ? storedMessages : [makeWelcomeMessage()]);
   };
 
   const handleDeleteConversation = (id: string) => {
@@ -192,12 +266,19 @@ export default function Home() {
     const nextList = conversations.filter(c => c.id !== id);
     setConversations(nextList);
     
+    // Remove from message map
+    setConversationMessages(prev => {
+      const updated = { ...prev };
+      delete updated[id];
+      return updated;
+    });
+    
     if (activeConversationId === id) {
       if (nextList.length > 0) {
         setActiveConversationId(nextList[0].id);
-        setMessages([getWelcomeMessage()]);
+        setMessages(conversationMessages[nextList[0].id] || [makeWelcomeMessage()]);
       } else {
-        createConversation();
+        createNewConversation();
       }
     }
   };
@@ -287,7 +368,9 @@ export default function Home() {
                   )}
                   
                   <span className="text-[10px] text-muted-foreground opacity-60 px-1">
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {msg.timestamp instanceof Date 
+                      ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      : new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
               </motion.div>
@@ -404,7 +487,7 @@ export default function Home() {
       <Sidebar
         conversations={conversations}
         activeConversationId={activeConversationId}
-        onNewConversation={() => createConversation()}
+        onNewConversation={() => createNewConversation()}
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}

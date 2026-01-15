@@ -66,16 +66,22 @@ Relationships:
 - sales.product_id references products.id
 `;
 
-      const systemPrompt = `You are a SQL expert. 
-Your task is to convert the user's natural language question into a VALID PostgreSQL query.
-Use the following schema:
+      const systemPrompt = `You are a SQL expert assistant. Your ONLY job is to convert natural language questions (in Korean or English) into valid PostgreSQL queries.
+
+Database Schema:
 ${schemaDescription}
 
-Rules:
-1. Return ONLY the raw SQL query. Do not include markdown formatting (like \`\`\`sql), explanations, or anything else.
-2. If the user asks for "top selling" or similar, aggregate by product_id and join with products table.
-3. Ensure all table and column names match the schema exactly.
-4. Use standard PostgreSQL syntax.
+RULES:
+1. Output ONLY the SQL query, nothing else. No explanations, no markdown.
+2. Use exact table and column names from the schema.
+3. For price-related queries, use ORDER BY price DESC or ASC.
+4. Always use LIMIT when asked for "top N" or "가장" queries.
+
+Examples:
+- "가장 비싼 제품 5개" → SELECT * FROM products ORDER BY price DESC LIMIT 5
+- "Show top 3 products by stock" → SELECT * FROM products ORDER BY stock DESC LIMIT 3
+- "모든 제품 보여줘" → SELECT * FROM products
+- "총 매출액" → SELECT SUM(total_price) as total_sales FROM sales
 `;
 
       const completion = await openai.chat.completions.create({
@@ -85,15 +91,34 @@ Rules:
           { role: "user", content: message },
         ],
         temperature: 0,
-        max_tokens: 256, // Limit tokens for faster response
+        max_tokens: 256,
       });
 
       let generatedSql = completion.choices[0]?.message?.content || "";
       
-      // Clean up SQL if it contains markdown
-      generatedSql = generatedSql.replace(/```sql/g, "").replace(/```/g, "").trim();
+      // Clean up SQL if it contains markdown or extra text
+      generatedSql = generatedSql.replace(/```sql/gi, "").replace(/```/g, "").trim();
+      // Extract just the SQL if there's extra text
+      const sqlMatch = generatedSql.match(/SELECT[\s\S]*?(?:;|$)/i);
+      if (sqlMatch) {
+        generatedSql = sqlMatch[0].replace(/;$/, '');
+      }
 
       console.log("Generated SQL:", generatedSql);
+
+      // Check if SQL is empty or invalid
+      if (!generatedSql || !generatedSql.toLowerCase().startsWith('select')) {
+        console.log("Empty or invalid SQL generated, attempting fallback");
+        // Try a simpler fallback
+        if (message.includes('제품') || message.includes('product')) {
+          generatedSql = 'SELECT * FROM products ORDER BY price DESC LIMIT 10';
+        } else if (message.includes('판매') || message.includes('sale')) {
+          generatedSql = 'SELECT * FROM sales ORDER BY sale_date DESC LIMIT 10';
+        } else {
+          generatedSql = 'SELECT * FROM products LIMIT 10';
+        }
+        console.log("Fallback SQL:", generatedSql);
+      }
 
       // 2. Execute SQL
       let queryResult;
