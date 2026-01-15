@@ -22,7 +22,7 @@ The frontend is organized as a single-page application with a chat interface as 
 
 Key UI Components:
 - **Sidebar** (`client/src/components/Sidebar.tsx`): Conversation history, new chat button, file upload, dark/light theme toggle
-- **TopNav** (`client/src/components/TopNav.tsx`): Tab navigation (채팅, 대시보드, 워크플로우, 인사이트, 데이터베이스, 설정)
+- **TopNav** (`client/src/components/TopNav.tsx`): Tab navigation (채팅, 데이터베이스, 설정)
 - **SettingsPage** (`client/src/components/SettingsPage.tsx`): Model configuration (temperature, RAG toggle)
 - **DatabasePage** (`client/src/components/DatabasePage.tsx`): Database table metadata display
 

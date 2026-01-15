@@ -1,6 +1,6 @@
-import { MessageSquare, LayoutDashboard, Database, Settings, Workflow, Lightbulb } from "lucide-react";
+import { MessageSquare, Database, Settings } from "lucide-react";
 
-export type TabType = 'chat' | 'dashboard' | 'workflow' | 'insights' | 'database' | 'settings';
+export type TabType = 'chat' | 'database' | 'settings';
 
 interface TopNavProps {
   activeTab: TabType;
@@ -9,9 +9,6 @@ interface TopNavProps {
 
 const tabs: { id: TabType; label: string; icon: typeof MessageSquare }[] = [
   { id: 'chat', label: '채팅', icon: MessageSquare },
-  { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
-  { id: 'workflow', label: '워크플로우', icon: Workflow },
-  { id: 'insights', label: '인사이트', icon: Lightbulb },
   { id: 'database', label: '데이터베이스', icon: Database },
 ];
 
