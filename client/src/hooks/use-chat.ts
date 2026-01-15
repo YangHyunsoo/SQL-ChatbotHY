@@ -1,6 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { api, type SqlChatResponse } from "@shared/routes";
-import { z } from "zod";
+import { api } from "@shared/routes";
 
 export type Message = {
   id: string;
