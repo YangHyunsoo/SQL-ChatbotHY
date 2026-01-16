@@ -1001,6 +1001,81 @@ ${FEW_SHOT_EXAMPLES}
     }
   });
 
+  // RAG Model Management APIs
+  
+  // Get all RAG models
+  app.get("/api/rag/models", async (req, res) => {
+    try {
+      const models = ragService.getRagModels();
+      res.json({ models });
+    } catch (err) {
+      console.error("Get RAG models error:", err);
+      res.status(500).json({ message: "모델 목록을 가져오는데 실패했습니다" });
+    }
+  });
+
+  // Update all RAG models (for batch updates)
+  app.put("/api/rag/models", async (req, res) => {
+    try {
+      const { models } = req.body;
+      if (!Array.isArray(models)) {
+        return res.status(400).json({ message: "잘못된 요청입니다" });
+      }
+      ragService.setRagModels(models);
+      res.json({ models: ragService.getRagModels() });
+    } catch (err) {
+      console.error("Update RAG models error:", err);
+      res.status(500).json({ message: "모델 업데이트에 실패했습니다" });
+    }
+  });
+
+  // Toggle RAG model enabled/disabled
+  app.patch("/api/rag/models/:id/toggle", async (req, res) => {
+    try {
+      const modelId = decodeURIComponent(req.params.id);
+      const { enabled } = req.body;
+      
+      if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ message: "enabled 값이 필요합니다" });
+      }
+      
+      const models = ragService.toggleRagModel(modelId, enabled);
+      res.json({ models });
+    } catch (err) {
+      console.error("Toggle RAG model error:", err);
+      res.status(500).json({ message: "모델 토글에 실패했습니다" });
+    }
+  });
+
+  // Add new RAG model
+  app.post("/api/rag/models", async (req, res) => {
+    try {
+      const { id, name } = req.body;
+      
+      if (!id || !name) {
+        return res.status(400).json({ message: "모델 ID와 이름이 필요합니다" });
+      }
+      
+      const models = ragService.addRagModel(id, name);
+      res.json({ models });
+    } catch (err) {
+      console.error("Add RAG model error:", err);
+      res.status(500).json({ message: "모델 추가에 실패했습니다" });
+    }
+  });
+
+  // Remove RAG model
+  app.delete("/api/rag/models/:id", async (req, res) => {
+    try {
+      const modelId = decodeURIComponent(req.params.id);
+      const models = ragService.removeRagModel(modelId);
+      res.json({ models });
+    } catch (err) {
+      console.error("Remove RAG model error:", err);
+      res.status(500).json({ message: "모델 삭제에 실패했습니다" });
+    }
+  });
+
   return httpServer;
 }
 

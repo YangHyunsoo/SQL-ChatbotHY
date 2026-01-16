@@ -9,12 +9,42 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
 });
 
-// 한국어 문서 요약 모델 - 우선순위별 폴백
-const RAG_MODELS = [
-  "google/gemini-2.0-flash-exp:free",       // Google Gemini - 안정적, 다국어 지원
-  "meta-llama/llama-3.3-70b-instruct:free", // Llama 3.3 - 대용량, 다국어
-  "mistralai/devstral-2512:free",           // Mistral Devstral - 백업
+// 기본 RAG 모델 목록 (로컬 기반, 온라인 모델 제외)
+const DEFAULT_RAG_MODELS = [
+  { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Meta Llama 3.3 70B", enabled: true },
+  { id: "mistralai/devstral-2512:free", name: "Mistral Devstral", enabled: true },
 ];
+
+// 런타임에 사용할 모델 목록 (설정에서 관리)
+let ragModels = [...DEFAULT_RAG_MODELS];
+
+export function getRagModels() {
+  return ragModels;
+}
+
+export function setRagModels(models: typeof ragModels) {
+  ragModels = models;
+}
+
+export function addRagModel(id: string, name: string) {
+  if (!ragModels.find(m => m.id === id)) {
+    ragModels.push({ id, name, enabled: true });
+  }
+  return ragModels;
+}
+
+export function toggleRagModel(id: string, enabled: boolean) {
+  const model = ragModels.find(m => m.id === id);
+  if (model) {
+    model.enabled = enabled;
+  }
+  return ragModels;
+}
+
+export function removeRagModel(id: string) {
+  ragModels = ragModels.filter(m => m.id !== id);
+  return ragModels;
+}
 
 export interface SearchResult {
   chunkId: number;
@@ -169,12 +199,18 @@ ${contextText}
 
 위 문서 내용을 바탕으로 답변해주세요.`;
 
-  // 여러 모델 폴백으로 안정성 향상
-  for (const model of RAG_MODELS) {
+  // 활성화된 모델만 사용 (다중 폴백)
+  const enabledModels = ragModels.filter(m => m.enabled);
+  
+  if (enabledModels.length === 0) {
+    return '활성화된 RAG 모델이 없습니다. 설정에서 모델을 활성화해주세요.';
+  }
+  
+  for (const model of enabledModels) {
     try {
-      console.log(`RAG using model: ${model}`);
+      console.log(`RAG using model: ${model.id} (${model.name})`);
       const response = await openai.chat.completions.create({
-        model: model,
+        model: model.id,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -188,7 +224,7 @@ ${contextText}
         return content;
       }
     } catch (error: any) {
-      console.error(`RAG model ${model} error:`, error.message || error);
+      console.error(`RAG model ${model.id} error:`, error.message || error);
       // 다음 모델로 폴백
       continue;
     }
