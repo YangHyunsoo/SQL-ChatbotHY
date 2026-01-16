@@ -7,21 +7,58 @@ export type Message = {
   content: string;
   sql?: string;
   data?: any[];
+  sources?: {
+    chunkId: number;
+    documentId: number;
+    documentName: string;
+    content: string;
+    pageNumber?: number;
+    score: number;
+  }[];
   error?: string;
   timestamp: Date;
 };
 
+interface ChatOptions {
+  message: string;
+  useRag?: boolean;
+}
+
 export function useChat() {
   return useMutation({
-    mutationFn: async (message: string) => {
-      // Input validation using schema
+    mutationFn: async (options: ChatOptions) => {
+      const { message, useRag } = options;
+      
+      // Use RAG endpoint if enabled
+      if (useRag) {
+        const res = await fetch('/api/knowledge/query', {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: message }),
+          credentials: "include",
+        });
+        
+        if (!res.ok) {
+          throw new Error("RAG 쿼리 실패");
+        }
+        
+        const data = await res.json();
+        return {
+          answer: data.answer,
+          sql: '',
+          data: [],
+          sources: data.sources,
+        };
+      }
+      
+      // Default SQL chat
       const input = api.chat.sql.input.parse({ message });
 
       const res = await fetch(api.chat.sql.path, {
         method: api.chat.sql.method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
-        credentials: "include", // Important for potential auth cookies
+        credentials: "include",
       });
 
       if (!res.ok) {
@@ -32,7 +69,6 @@ export function useChat() {
         throw new Error("Failed to send message");
       }
 
-      // Validate response using schema
       return api.chat.sql.responses[200].parse(await res.json());
     },
   });

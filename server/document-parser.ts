@@ -3,7 +3,9 @@ import mammoth from 'mammoth';
 import Tesseract from 'tesseract.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
 
+const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 
 export interface ParsedDocument {

@@ -9,6 +9,7 @@ import { DataTable } from "@/components/DataTable";
 import { DataChart, ChartToggle, canShowChart } from "@/components/DataChart";
 import { SettingsPage } from "@/components/SettingsPage";
 import { DatabasePage } from "@/components/DatabasePage";
+import { KnowledgeBasePage } from "@/components/KnowledgeBasePage";
 import { FileUploadDialog } from "@/components/FileUploadDialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bot, User, AlertCircle, Sparkles, Terminal, Database } from "lucide-react";
@@ -252,7 +253,7 @@ export default function Home() {
     
     setMessages(prev => [...prev, newMessage]);
 
-    chatMutation.mutate(content, {
+    chatMutation.mutate({ message: content, useRag: settings.useRag }, {
       onSuccess: (data) => {
         const responseMessage: Message = {
           id: crypto.randomUUID(),
@@ -260,7 +261,8 @@ export default function Home() {
           content: data.answer,
           sql: data.sql,
           data: data.data,
-          error: data.error,
+          sources: (data as any).sources,
+          error: (data as any).error,
           timestamp: new Date()
         };
         setMessages(prev => [...prev, responseMessage]);
@@ -422,6 +424,35 @@ export default function Home() {
                           <DataTable data={msg.data} />
                         </motion.div>
                       )}
+                      
+                      {msg.sources && msg.sources.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: 0.2 }}
+                          className="w-full mt-3"
+                        >
+                          <div className="p-3 rounded-lg bg-muted/50 border border-border/50">
+                            <p className="text-xs font-medium text-muted-foreground mb-2">📚 출처</p>
+                            <div className="space-y-2">
+                              {msg.sources.slice(0, 3).map((source, idx) => (
+                                <div key={source.chunkId} className="text-xs p-2 rounded bg-background border border-border/30">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-medium text-foreground">{source.documentName}</span>
+                                    {source.pageNumber && (
+                                      <span className="text-muted-foreground">({source.pageNumber}페이지)</span>
+                                    )}
+                                    <span className="text-muted-foreground/60 text-[10px] ml-auto">
+                                      관련도: {Math.round(source.score * 100)}%
+                                    </span>
+                                  </div>
+                                  <p className="text-muted-foreground line-clamp-2">{source.content}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
                     </div>
                   )}
                   
@@ -450,7 +481,9 @@ export default function Home() {
                   <span className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
                   <span className="w-2 h-2 rounded-full bg-primary animate-bounce" />
                 </div>
-                <span className="text-xs text-muted-foreground animate-pulse ml-1">데이터베이스 분석 중...</span>
+                <span className="text-xs text-muted-foreground animate-pulse ml-1">
+                  {settings.useRag ? '문서 검색 중...' : '데이터베이스 분석 중...'}
+                </span>
               </div>
             </motion.div>
           )}
@@ -531,6 +564,8 @@ export default function Home() {
         return renderChatContent();
       case 'database':
         return <DatabasePage refreshKey={datasetRefreshKey} />;
+      case 'knowledge':
+        return <KnowledgeBasePage />;
       case 'settings':
         return <SettingsPage settings={settings} onSettingsChange={setSettings} />;
       default:
