@@ -842,7 +842,7 @@ ${FEW_SHOT_EXAMPLES}
   // === Knowledge Base (RAG) API ===
 
   // List all knowledge documents
-  app.get("/api/knowledge", async (req, res) => {
+  app.get("/api/knowledge-base/documents", async (req, res) => {
     try {
       const docs = await db.select().from(knowledgeDocuments).orderBy(desc(knowledgeDocuments.createdAt));
       res.json(docs);
@@ -853,7 +853,7 @@ ${FEW_SHOT_EXAMPLES}
   });
 
   // Get knowledge base stats
-  app.get("/api/knowledge/stats", async (req, res) => {
+  app.get("/api/knowledge-base/stats", async (req, res) => {
     try {
       const stats = await ragService.getDocumentStats();
       res.json(stats);
@@ -864,7 +864,7 @@ ${FEW_SHOT_EXAMPLES}
   });
 
   // Upload documents (multi-file support)
-  app.post("/api/knowledge/upload", knowledgeUpload.array('files', 50), async (req, res) => {
+  app.post("/api/knowledge-base/upload", knowledgeUpload.array('files', 50), async (req, res) => {
     try {
       const files = req.files as Express.Multer.File[];
       
@@ -931,7 +931,7 @@ ${FEW_SHOT_EXAMPLES}
   });
 
   // RAG query endpoint
-  app.post("/api/knowledge/query", async (req, res) => {
+  app.post("/api/rag/query", async (req, res) => {
     try {
       const { query } = req.body;
       
@@ -948,7 +948,7 @@ ${FEW_SHOT_EXAMPLES}
   });
 
   // Search documents
-  app.post("/api/knowledge/search", async (req, res) => {
+  app.post("/api/knowledge-base/search", async (req, res) => {
     try {
       const { query, topK = 5 } = req.body;
       
@@ -965,7 +965,7 @@ ${FEW_SHOT_EXAMPLES}
   });
 
   // Delete knowledge document
-  app.delete("/api/knowledge/:id", async (req, res) => {
+  app.delete("/api/knowledge-base/documents/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
