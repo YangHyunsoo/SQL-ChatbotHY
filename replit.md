@@ -73,6 +73,11 @@ The server handles API requests, serves the static frontend in production, and m
   - Dataset viewing with pagination (queries from DuckDB or PostgreSQL)
   - Dataset deletion with DuckDB table cleanup
   - Dynamic AI schema includes uploaded datasets
+  - **Auto-generated sample questions**: Based on uploaded dataset columns and types
+    - API endpoint: `/api/sample-questions`
+    - Generates context-aware questions (count, aggregate, group by, filter)
+    - Displays in chat interface with dataset-specific styling
+  - Full Korean filename and column name support (Unicode ranges \uAC00-\uD7A3)
 
 ### AI Integration
 - **Provider**: OpenRouter API (OpenAI-compatible interface)

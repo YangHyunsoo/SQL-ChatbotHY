@@ -711,6 +711,95 @@ ${FEW_SHOT_EXAMPLES}
     }
   });
 
+  // Generate sample questions based on datasets
+  app.get("/api/sample-questions", async (req, res) => {
+    try {
+      // Base sample queries for default schema
+      const defaultQueries = [
+        "가장 비싼 상위 5개 제품을 보여줘",
+        "카테고리별 총 매출은 얼마야?",
+        "최근 7일간의 모든 판매 내역을 보여줘",
+        "재고가 20개 미만인 제품은?"
+      ];
+      
+      // Fetch uploaded datasets
+      const uploadedDatasets = await db.select().from(datasets).orderBy(desc(datasets.createdAt));
+      
+      if (uploadedDatasets.length === 0) {
+        return res.json({ questions: defaultQueries, datasetQuestions: [] });
+      }
+      
+      // Generate questions for each dataset based on its columns
+      const datasetQuestions: { datasetName: string; questions: string[] }[] = [];
+      
+      for (const dataset of uploadedDatasets.slice(0, 3)) { // Limit to 3 most recent datasets
+        if (!dataset.columnInfo) continue;
+        
+        try {
+          const columns: ColumnInfo[] = JSON.parse(dataset.columnInfo);
+          const questions: string[] = [];
+          const datasetName = dataset.name;
+          
+          // Filter columns with valid (non-empty) names
+          const validColumns = columns.filter(c => c.name && c.name.trim() !== '');
+          const numberCols = validColumns.filter(c => c.type === 'number' && c.name.trim());
+          const textCols = validColumns.filter(c => c.type === 'text' && c.name.trim());
+          const dateCols = validColumns.filter(c => c.type === 'date' && c.name.trim());
+          
+          // Pattern 1: Count total records (always valid)
+          questions.push(`${datasetName}의 전체 데이터 수는?`);
+          
+          // Pattern 2: If there are number columns with valid names, suggest aggregation
+          if (numberCols.length > 0) {
+            const numCol = numberCols[0].name.trim();
+            questions.push(`${datasetName}에서 ${numCol}의 합계/평균은?`);
+          }
+          
+          // Pattern 3: If there are text columns with valid names, suggest grouping
+          if (textCols.length > 0) {
+            const textCol = textCols[0].name.trim();
+            questions.push(`${datasetName}에서 ${textCol}별로 몇 건인지 보여줘`);
+          }
+          
+          // Pattern 4: Show sample data (always valid)
+          questions.push(`${datasetName}의 최근 10건 데이터 보여줘`);
+          
+          // Pattern 5: If there are date columns with valid names, suggest filtering
+          if (dateCols.length > 0) {
+            const dateCol = dateCols[0].name.trim();
+            questions.push(`${datasetName}에서 ${dateCol} 기준 최신 데이터는?`);
+          }
+          
+          // Pattern 6: Search for specific values from text columns
+          if (textCols.length > 0 && textCols[0].sampleValues && textCols[0].sampleValues.length > 0) {
+            const sampleValue = textCols[0].sampleValues[0];
+            if (sampleValue && sampleValue.trim() && sampleValue.length <= 30) {
+              questions.push(`${datasetName}에서 "${sampleValue}" 관련 데이터 찾아줘`);
+            }
+          }
+          
+          // Only add if we have meaningful questions (more than just count/sample)
+          if (questions.length >= 2) {
+            datasetQuestions.push({
+              datasetName,
+              questions: questions.slice(0, 4) // Limit to 4 questions per dataset
+            });
+          }
+        } catch (parseErr) {
+          console.error("Failed to parse column info for dataset:", dataset.id, parseErr);
+        }
+      }
+      
+      res.json({
+        questions: defaultQueries,
+        datasetQuestions
+      });
+    } catch (err) {
+      console.error("Sample questions error:", err);
+      res.status(500).json({ message: "Failed to generate sample questions" });
+    }
+  });
+
   // Delete dataset
   app.delete("/api/datasets/:id", async (req, res) => {
     try {

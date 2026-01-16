@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useChat, type Message } from "@/hooks/use-chat";
 import { Sidebar, type Conversation } from "@/components/Sidebar";
 import { TopNav, type TabType } from "@/components/TopNav";
@@ -9,7 +10,15 @@ import { SettingsPage } from "@/components/SettingsPage";
 import { DatabasePage } from "@/components/DatabasePage";
 import { FileUploadDialog } from "@/components/FileUploadDialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bot, User, AlertCircle, Sparkles, Terminal } from "lucide-react";
+import { Bot, User, AlertCircle, Sparkles, Terminal, Database } from "lucide-react";
+
+interface SampleQuestionsResponse {
+  questions: string[];
+  datasetQuestions: {
+    datasetName: string;
+    questions: string[];
+  }[];
+}
 
 const STORAGE_KEY = 'sqlchat_history_v2';
 const MAX_CONVERSATIONS = 20;
@@ -61,6 +70,17 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
   const chatMutation = useChat();
+
+  // Fetch dynamic sample questions based on uploaded datasets
+  const { data: sampleQuestionsData } = useQuery<SampleQuestionsResponse>({
+    queryKey: ['/api/sample-questions', datasetRefreshKey],
+    queryFn: async () => {
+      const res = await fetch('/api/sample-questions');
+      if (!res.ok) throw new Error('Failed to fetch sample questions');
+      return res.json();
+    },
+    staleTime: 30000, // Cache for 30 seconds
+  });
 
   const makeWelcomeMessage = (): Message => ({
     id: "welcome",
@@ -313,12 +333,15 @@ export default function Home() {
     setActiveTab('database');
   };
 
-  const sampleQueries = [
+  // Use dynamic sample queries from API, with fallback to static ones
+  const defaultQueries = [
     "가장 비싼 상위 5개 제품을 보여줘",
     "카테고리별 총 매출은 얼마야?",
     "최근 7일간의 모든 판매 내역을 보여줘",
     "재고가 20개 미만인 제품은?"
   ];
+  const sampleQueries = sampleQuestionsData?.questions || defaultQueries;
+  const datasetQueries = sampleQuestionsData?.datasetQuestions || [];
 
   const renderChatContent = () => (
     <div className="flex-1 flex flex-col relative">
@@ -420,25 +443,62 @@ export default function Home() {
           <div ref={bottomRef} />
           
           {messages.length <= 1 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4 sm:mt-8 px-1 sm:px-4">
-              {sampleQueries.map((query, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSend(query)}
-                  className="group relative p-4 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 text-left transition-all duration-300"
-                  data-testid={`sample-query-${i}`}
-                >
-                  <div className="absolute top-4 right-4 text-primary/20 group-hover:text-primary transition-colors">
-                    <Terminal className="w-5 h-5" />
-                  </div>
-                  <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors block mb-1">
-                    추천 질문
-                  </span>
-                  <span className="text-sm text-muted-foreground group-hover:text-foreground/80 transition-colors">
-                    "{query}"
-                  </span>
-                </button>
-              ))}
+            <div className="space-y-6 mt-4 sm:mt-8 px-1 sm:px-4">
+              {/* Dataset-specific questions */}
+              {datasetQueries.length > 0 && (
+                <div className="space-y-4">
+                  {datasetQueries.map((ds, dsIdx) => (
+                    <div key={dsIdx} className="space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                        <Database className="w-4 h-4" />
+                        <span>{ds.datasetName} 관련 질문</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {ds.questions.map((query, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSend(query)}
+                            className="group relative p-3 sm:p-4 rounded-xl border border-primary/30 bg-primary/5 hover:border-primary hover:bg-primary/10 hover:shadow-lg hover:shadow-primary/5 text-left transition-all duration-300"
+                            data-testid={`dataset-query-${dsIdx}-${i}`}
+                          >
+                            <div className="absolute top-3 sm:top-4 right-3 sm:right-4 text-primary/30 group-hover:text-primary transition-colors">
+                              <Database className="w-4 h-4" />
+                            </div>
+                            <span className="text-sm text-muted-foreground group-hover:text-foreground/90 transition-colors pr-6">
+                              "{query}"
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Default sample queries */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <Terminal className="w-4 h-4" />
+                  <span>기본 테이블 질문</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  {sampleQueries.map((query, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleSend(query)}
+                      className="group relative p-3 sm:p-4 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 text-left transition-all duration-300"
+                      data-testid={`sample-query-${i}`}
+                    >
+                      <div className="absolute top-3 sm:top-4 right-3 sm:right-4 text-primary/20 group-hover:text-primary transition-colors">
+                        <Terminal className="w-4 h-4" />
+                      </div>
+                      <span className="text-sm text-muted-foreground group-hover:text-foreground/80 transition-colors pr-6">
+                        "{query}"
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>
