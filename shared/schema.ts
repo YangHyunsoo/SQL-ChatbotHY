@@ -59,6 +59,70 @@ export const insertSaleSchema = createInsertSchema(sales).omit({ id: true, saleD
 export type Product = typeof products.$inferSelect;
 export type Sale = typeof sales.$inferSelect;
 
+// === DATASETS (CSV Upload with Structured/Unstructured Support) ===
+
+export const datasets = pgTable("datasets", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  fileName: text("file_name").notNull(),
+  dataType: text("data_type").notNull(), // 'structured' or 'unstructured'
+  rowCount: integer("row_count").notNull().default(0),
+  columnInfo: text("column_info"), // JSON string of column metadata for structured data
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// For structured data: dynamically typed columns stored as JSONB
+export const structuredData = pgTable("structured_data", {
+  id: serial("id").primaryKey(),
+  datasetId: integer("dataset_id").references(() => datasets.id, { onDelete: "cascade" }),
+  rowIndex: integer("row_index").notNull(),
+  data: text("data").notNull(), // JSON string of row data with typed values
+});
+
+// For unstructured data: flexible JSONB storage with text search support
+export const unstructuredData = pgTable("unstructured_data", {
+  id: serial("id").primaryKey(),
+  datasetId: integer("dataset_id").references(() => datasets.id, { onDelete: "cascade" }),
+  rowIndex: integer("row_index").notNull(),
+  rawContent: text("raw_content"), // Original text content
+  metadata: text("metadata"), // JSON string of extracted metadata
+  searchText: text("search_text"), // Normalized text for search
+});
+
+export const datasetsRelations = relations(datasets, ({ many }) => ({
+  structuredRows: many(structuredData),
+  unstructuredRows: many(unstructuredData),
+}));
+
+export const structuredDataRelations = relations(structuredData, ({ one }) => ({
+  dataset: one(datasets, {
+    fields: [structuredData.datasetId],
+    references: [datasets.id],
+  }),
+}));
+
+export const unstructuredDataRelations = relations(unstructuredData, ({ one }) => ({
+  dataset: one(datasets, {
+    fields: [unstructuredData.datasetId],
+    references: [datasets.id],
+  }),
+}));
+
+export const insertDatasetSchema = createInsertSchema(datasets).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true 
+});
+export const insertStructuredDataSchema = createInsertSchema(structuredData).omit({ id: true });
+export const insertUnstructuredDataSchema = createInsertSchema(unstructuredData).omit({ id: true });
+
+export type Dataset = typeof datasets.$inferSelect;
+export type InsertDataset = z.infer<typeof insertDatasetSchema>;
+export type StructuredDataRow = typeof structuredData.$inferSelect;
+export type UnstructuredDataRow = typeof unstructuredData.$inferSelect;
+
 // === API TYPES ===
 
 export interface SqlChatRequest {
@@ -70,4 +134,17 @@ export interface SqlChatResponse {
   sql: string;
   data: any[];
   error?: string;
+}
+
+export interface DatasetUploadRequest {
+  name: string;
+  dataType: 'structured' | 'unstructured';
+  description?: string;
+}
+
+export interface ColumnInfo {
+  name: string;
+  type: 'text' | 'number' | 'date' | 'boolean';
+  nullable: boolean;
+  sampleValues: string[];
 }

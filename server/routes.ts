@@ -5,7 +5,10 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import OpenAI from "openai";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, eq, desc } from "drizzle-orm";
+import multer from "multer";
+import Papa from "papaparse";
+import { datasets, structuredData, unstructuredData, type ColumnInfo } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
@@ -13,6 +16,94 @@ const openai = new OpenAI({
 });
 
 const MODEL = "mistralai/devstral-2512:free";
+
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+function inferColumnType(values: string[]): 'text' | 'number' | 'date' | 'boolean' {
+  const nonEmptyValues = values.filter(v => v !== null && v !== undefined && v.trim() !== '');
+  if (nonEmptyValues.length === 0) return 'text';
+
+  const numberCount = nonEmptyValues.filter(v => !isNaN(Number(v.replace(/,/g, '')))).length;
+  if (numberCount / nonEmptyValues.length > 0.8) return 'number';
+
+  const booleanCount = nonEmptyValues.filter(v => 
+    ['true', 'false', 'yes', 'no', '1', '0', '예', '아니오', 'Y', 'N'].includes(v.toLowerCase())
+  ).length;
+  if (booleanCount / nonEmptyValues.length > 0.8) return 'boolean';
+
+  const datePatterns = [
+    /^\d{4}-\d{2}-\d{2}/,
+    /^\d{2}\/\d{2}\/\d{4}/,
+    /^\d{4}\/\d{2}\/\d{2}/,
+  ];
+  const dateCount = nonEmptyValues.filter(v => 
+    datePatterns.some(p => p.test(v))
+  ).length;
+  if (dateCount / nonEmptyValues.length > 0.8) return 'date';
+
+  return 'text';
+}
+
+function analyzeColumns(headers: string[], rows: any[]): ColumnInfo[] {
+  return headers.map(header => {
+    const values = rows.slice(0, 100).map(row => String(row[header] || ''));
+    return {
+      name: header,
+      type: inferColumnType(values),
+      nullable: values.some(v => !v || v.trim() === ''),
+      sampleValues: values.slice(0, 3).filter(v => v.trim() !== '')
+    };
+  });
+}
+
+async function buildDynamicSchema(): Promise<string> {
+  let schema = ENHANCED_SCHEMA;
+  
+  try {
+    const uploadedDatasets = await db.select().from(datasets);
+    
+    if (uploadedDatasets.length > 0) {
+      schema += '\n\n=== 사용자 업로드 데이터셋 ===\n';
+      
+      for (const dataset of uploadedDatasets) {
+        if (dataset.dataType === 'structured' && dataset.columnInfo) {
+          const columns: ColumnInfo[] = JSON.parse(dataset.columnInfo);
+          schema += `\n[structured_data 테이블에서 dataset_id = ${dataset.id}] - ${dataset.name}\n`;
+          schema += `설명: ${dataset.description || dataset.fileName}\n`;
+          schema += '| 컬럼명 | 타입 |\n';
+          schema += '|--------|------|\n';
+          
+          for (const col of columns) {
+            const sqlType = col.type === 'number' ? 'NUMERIC' 
+              : col.type === 'date' ? 'TIMESTAMP' 
+              : col.type === 'boolean' ? 'BOOLEAN'
+              : 'TEXT';
+            schema += `| ${col.name} | ${sqlType} |\n`;
+          }
+          
+          schema += `\n쿼리 예시: SELECT data->>'${columns[0]?.name || 'column'}' as ${columns[0]?.name || 'column'} FROM structured_data WHERE dataset_id = ${dataset.id}\n`;
+        } else if (dataset.dataType === 'unstructured') {
+          schema += `\n[unstructured_data 테이블에서 dataset_id = ${dataset.id}] - ${dataset.name}\n`;
+          schema += `설명: ${dataset.description || dataset.fileName} (비정형 텍스트 데이터)\n`;
+          schema += '| 컬럼명 | 타입 | 설명 |\n';
+          schema += '|--------|------|------|\n';
+          schema += '| raw_content | TEXT | 원본 텍스트 |\n';
+          schema += '| search_text | TEXT | 검색용 텍스트 (소문자) |\n';
+          schema += `\n쿼리 예시: SELECT raw_content FROM unstructured_data WHERE dataset_id = ${dataset.id} AND search_text LIKE '%검색어%'\n`;
+        }
+      }
+      
+      schema += `\n[참고] 정형 데이터는 JSON 형식으로 저장됨. data->>'컬럼명'으로 접근\n`;
+    }
+  } catch (err) {
+    console.error("Error building dynamic schema:", err);
+  }
+  
+  return schema;
+}
 
 const ENHANCED_SCHEMA = `
 === 데이터베이스 스키마 (PostgreSQL) ===
@@ -236,9 +327,12 @@ export async function registerRoutes(
     try {
       const { message } = api.chat.sql.input.parse(req.body);
 
+      // Build dynamic schema including uploaded datasets
+      const dynamicSchema = await buildDynamicSchema();
+
       const systemPrompt = `You are a PostgreSQL SQL expert assistant. Convert natural language questions (Korean or English) into valid PostgreSQL queries.
 
-${ENHANCED_SCHEMA}
+${dynamicSchema}
 
 ${FEW_SHOT_EXAMPLES}
 
@@ -344,6 +438,220 @@ ${FEW_SHOT_EXAMPLES}
       } else {
         res.status(500).json({ message: "Internal server error" });
       }
+    }
+  });
+
+  // === Dataset Management API ===
+  
+  // List all datasets
+  app.get("/api/datasets", async (req, res) => {
+    try {
+      const allDatasets = await db.select().from(datasets).orderBy(desc(datasets.createdAt));
+      res.json(allDatasets);
+    } catch (err) {
+      console.error("Get datasets error:", err);
+      res.status(500).json({ message: "Failed to get datasets" });
+    }
+  });
+
+  // Get single dataset
+  app.get("/api/datasets/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const dataset = await db.select().from(datasets).where(eq(datasets.id, id)).limit(1);
+      if (dataset.length === 0) {
+        return res.status(404).json({ message: "Dataset not found" });
+      }
+      res.json(dataset[0]);
+    } catch (err) {
+      console.error("Get dataset error:", err);
+      res.status(500).json({ message: "Failed to get dataset" });
+    }
+  });
+
+  // Get dataset data with pagination
+  app.get("/api/datasets/:id/data", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+      const offset = (page - 1) * limit;
+
+      const dataset = await db.select().from(datasets).where(eq(datasets.id, id)).limit(1);
+      if (dataset.length === 0) {
+        return res.status(404).json({ message: "Dataset not found" });
+      }
+
+      const ds = dataset[0];
+      let rows: any[] = [];
+
+      if (ds.dataType === 'structured') {
+        const result = await db.select()
+          .from(structuredData)
+          .where(eq(structuredData.datasetId, id))
+          .orderBy(structuredData.rowIndex)
+          .limit(limit)
+          .offset(offset);
+        rows = result.map(r => JSON.parse(r.data));
+      } else {
+        const result = await db.select()
+          .from(unstructuredData)
+          .where(eq(unstructuredData.datasetId, id))
+          .orderBy(unstructuredData.rowIndex)
+          .limit(limit)
+          .offset(offset);
+        rows = result.map(r => ({
+          _id: r.id,
+          _content: r.rawContent,
+          _metadata: r.metadata ? JSON.parse(r.metadata) : null
+        }));
+      }
+
+      res.json({
+        dataset: ds,
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total: ds.rowCount,
+          totalPages: Math.ceil(ds.rowCount / limit)
+        }
+      });
+    } catch (err) {
+      console.error("Get dataset data error:", err);
+      res.status(500).json({ message: "Failed to get dataset data" });
+    }
+  });
+
+  // Upload CSV file
+  app.post("/api/datasets/upload", upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const { name, dataType, description } = req.body;
+      if (!name || !dataType) {
+        return res.status(400).json({ message: "Name and dataType are required" });
+      }
+
+      const csvContent = req.file.buffer.toString('utf-8');
+      const parsed = Papa.parse(csvContent, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (header) => header.trim()
+      });
+
+      if (parsed.errors.length > 0) {
+        console.error("CSV parse errors:", parsed.errors);
+      }
+
+      const rows = parsed.data as Record<string, string>[];
+      const headers = parsed.meta.fields || [];
+
+      if (rows.length === 0) {
+        return res.status(400).json({ message: "CSV file is empty" });
+      }
+
+      // Analyze column types for structured data
+      const columnInfo = dataType === 'structured' 
+        ? analyzeColumns(headers, rows)
+        : null;
+
+      // Create dataset record
+      const [newDataset] = await db.insert(datasets).values({
+        name,
+        fileName: req.file.originalname,
+        dataType,
+        rowCount: rows.length,
+        columnInfo: columnInfo ? JSON.stringify(columnInfo) : null,
+        description: description || null
+      }).returning();
+
+      // Insert data rows
+      if (dataType === 'structured') {
+        const batchSize = 100;
+        for (let i = 0; i < rows.length; i += batchSize) {
+          const batch = rows.slice(i, i + batchSize).map((row, idx) => ({
+            datasetId: newDataset.id,
+            rowIndex: i + idx,
+            data: JSON.stringify(row)
+          }));
+          await db.insert(structuredData).values(batch);
+        }
+      } else {
+        // For unstructured data, treat each row as a document
+        const batchSize = 100;
+        for (let i = 0; i < rows.length; i += batchSize) {
+          const batch = rows.slice(i, i + batchSize).map((row, idx) => {
+            const content = Object.values(row).join(' ').trim();
+            return {
+              datasetId: newDataset.id,
+              rowIndex: i + idx,
+              rawContent: content,
+              metadata: JSON.stringify(row),
+              searchText: content.toLowerCase()
+            };
+          });
+          await db.insert(unstructuredData).values(batch);
+        }
+      }
+
+      res.json({
+        message: "Dataset uploaded successfully",
+        dataset: newDataset,
+        columns: columnInfo
+      });
+
+    } catch (err) {
+      console.error("Upload error:", err);
+      res.status(500).json({ message: "Failed to upload dataset" });
+    }
+  });
+
+  // Update dataset metadata
+  app.put("/api/datasets/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { name, description } = req.body;
+
+      const [updated] = await db.update(datasets)
+        .set({ 
+          name: name || undefined,
+          description: description !== undefined ? description : undefined,
+          updatedAt: new Date()
+        })
+        .where(eq(datasets.id, id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Dataset not found" });
+      }
+
+      res.json(updated);
+    } catch (err) {
+      console.error("Update dataset error:", err);
+      res.status(500).json({ message: "Failed to update dataset" });
+    }
+  });
+
+  // Delete dataset
+  app.delete("/api/datasets/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      
+      const [deleted] = await db.delete(datasets)
+        .where(eq(datasets.id, id))
+        .returning();
+
+      if (!deleted) {
+        return res.status(404).json({ message: "Dataset not found" });
+      }
+
+      res.json({ message: "Dataset deleted successfully" });
+    } catch (err) {
+      console.error("Delete dataset error:", err);
+      res.status(500).json({ message: "Failed to delete dataset" });
     }
   });
 

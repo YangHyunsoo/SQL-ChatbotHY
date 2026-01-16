@@ -7,6 +7,7 @@ import { SqlBlock } from "@/components/SqlBlock";
 import { DataTable } from "@/components/DataTable";
 import { SettingsPage } from "@/components/SettingsPage";
 import { DatabasePage } from "@/components/DatabasePage";
+import { FileUploadDialog } from "@/components/FileUploadDialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bot, User, AlertCircle, Sparkles, Terminal } from "lucide-react";
 
@@ -54,9 +55,10 @@ export default function Home() {
     temperature: 0,
     useRag: false
   });
+  const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
+  const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
   
   const bottomRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const hasInitialized = useRef(false);
   const chatMutation = useChat();
 
@@ -302,7 +304,13 @@ export default function Home() {
   };
 
   const handleFileUpload = () => {
-    fileInputRef.current?.click();
+    setIsFileDialogOpen(true);
+  };
+
+  const handleUploadSuccess = () => {
+    setDatasetRefreshKey(prev => prev + 1);
+    // Switch to database tab to show uploaded data
+    setActiveTab('database');
   };
 
   const sampleQueries = [
@@ -447,7 +455,7 @@ export default function Home() {
       case 'chat':
         return renderChatContent();
       case 'database':
-        return <DatabasePage />;
+        return <DatabasePage refreshKey={datasetRefreshKey} />;
       case 'settings':
         return <SettingsPage settings={settings} onSettingsChange={setSettings} />;
       default:
@@ -457,15 +465,10 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex bg-background font-sans">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".csv,.tsv,.xls,.xlsx"
-        className="hidden"
-        onChange={(e) => {
-          // File upload handling would go here
-          e.target.value = '';
-        }}
+      <FileUploadDialog
+        open={isFileDialogOpen}
+        onOpenChange={setIsFileDialogOpen}
+        onUploadSuccess={handleUploadSuccess}
       />
       
       <Sidebar

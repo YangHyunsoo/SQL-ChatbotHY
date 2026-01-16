@@ -48,11 +48,31 @@ The server handles API requests, serves the static frontend in production, and m
   - `products` - Sample product catalog
   - `sales` - Sample sales records
   - `conversations` / `messages` - Chat history persistence
+  - `datasets` - Uploaded CSV dataset metadata
+  - `structured_data` - Structured (tabular) data storage with JSON columns
+  - `unstructured_data` - Unstructured (text) data with search support
+
+### CSV Upload & Dataset Management (v1.5)
+- **File Upload**: Multer for multipart/form-data handling, max 10MB
+- **CSV Parsing**: PapaParse for parsing CSV files with header support
+- **Data Types**:
+  - **Structured**: Tabular data with auto-inferred column types (text, number, date, boolean)
+  - **Unstructured**: Text content with flexible metadata and full-text search
+- **Features**:
+  - Automatic column type inference from data
+  - Dataset viewing with pagination
+  - Dataset deletion with cascade
+  - Dynamic AI schema includes uploaded datasets for natural language queries
 
 ### AI Integration
 - **Provider**: OpenRouter API (OpenAI-compatible interface)
-- **Model**: Mistral 7B Instruct (free tier, optimized for low-spec systems)
+- **Model**: mistralai/devstral-2512:free (optimized for low-spec systems)
 - **Purpose**: Natural language to SQL translation
+- **Features**:
+  - Enhanced schema metadata with column types and descriptions
+  - 16 few-shot examples for improved SQL accuracy
+  - SQL error auto-retry with LLM-based fix (max 2 retries)
+  - Dynamic schema includes user-uploaded datasets
 - **Rate Limiting**: Batch processing utilities with exponential backoff retry logic
 
 ### Key Design Decisions
