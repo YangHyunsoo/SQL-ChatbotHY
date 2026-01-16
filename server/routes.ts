@@ -8,8 +8,11 @@ import { db } from "./db";
 import { sql, eq, desc } from "drizzle-orm";
 import multer from "multer";
 import Papa from "papaparse";
-import { datasets, structuredData, unstructuredData, type ColumnInfo } from "@shared/schema";
+import { datasets, structuredData, unstructuredData, knowledgeDocuments, documentChunks, type ColumnInfo } from "@shared/schema";
 import * as duckdbService from "./duckdb-service";
+import * as documentParser from "./document-parser";
+import * as embeddingService from "./embedding-service";
+import * as ragService from "./rag-service";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
@@ -21,6 +24,11 @@ const MODEL = "mistralai/devstral-2512:free";
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+const knowledgeUpload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB per file
 });
 
 function inferColumnType(values: string[]): 'text' | 'number' | 'date' | 'boolean' {
@@ -831,5 +839,220 @@ ${FEW_SHOT_EXAMPLES}
     }
   });
 
+  // === Knowledge Base (RAG) API ===
+
+  // List all knowledge documents
+  app.get("/api/knowledge", async (req, res) => {
+    try {
+      const docs = await db.select().from(knowledgeDocuments).orderBy(desc(knowledgeDocuments.createdAt));
+      res.json(docs);
+    } catch (err) {
+      console.error("Get knowledge documents error:", err);
+      res.status(500).json({ message: "Failed to get documents" });
+    }
+  });
+
+  // Get knowledge base stats
+  app.get("/api/knowledge/stats", async (req, res) => {
+    try {
+      const stats = await ragService.getDocumentStats();
+      res.json(stats);
+    } catch (err) {
+      console.error("Get knowledge stats error:", err);
+      res.status(500).json({ message: "Failed to get stats" });
+    }
+  });
+
+  // Upload documents (multi-file support)
+  app.post("/api/knowledge/upload", knowledgeUpload.array('files', 50), async (req, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      
+      if (!files || files.length === 0) {
+        return res.status(400).json({ message: "파일이 업로드되지 않았습니다" });
+      }
+
+      // Check total size limit (500MB)
+      const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+      if (totalSize > 500 * 1024 * 1024) {
+        return res.status(400).json({ message: "총 파일 크기가 500MB를 초과합니다" });
+      }
+
+      const results: any[] = [];
+      const errors: any[] = [];
+
+      for (const file of files) {
+        try {
+          // Validate file type
+          if (!documentParser.isValidFileType(file.originalname)) {
+            errors.push({
+              fileName: file.originalname,
+              error: "지원하지 않는 파일 형식입니다 (PDF, DOC, DOCX, PPT, PPTX만 가능)"
+            });
+            continue;
+          }
+
+          // Create document record
+          const [newDoc] = await db.insert(knowledgeDocuments).values({
+            name: file.originalname.replace(/\.[^/.]+$/, ''),
+            fileName: file.originalname,
+            fileType: documentParser.getFileType(file.originalname),
+            fileSize: file.size,
+            status: 'processing',
+          }).returning();
+
+          // Process document asynchronously
+          processDocument(newDoc.id, file.buffer, file.originalname).catch(err => {
+            console.error(`Failed to process document ${newDoc.id}:`, err);
+          });
+
+          results.push({
+            id: newDoc.id,
+            fileName: file.originalname,
+            status: 'processing'
+          });
+        } catch (fileErr: any) {
+          errors.push({
+            fileName: file.originalname,
+            error: fileErr.message
+          });
+        }
+      }
+
+      res.json({
+        success: results.length > 0,
+        uploaded: results,
+        errors: errors.length > 0 ? errors : undefined
+      });
+    } catch (err) {
+      console.error("Knowledge upload error:", err);
+      res.status(500).json({ message: "파일 업로드에 실패했습니다" });
+    }
+  });
+
+  // RAG query endpoint
+  app.post("/api/knowledge/query", async (req, res) => {
+    try {
+      const { query } = req.body;
+      
+      if (!query || typeof query !== 'string') {
+        return res.status(400).json({ message: "질문을 입력해주세요" });
+      }
+
+      const result = await ragService.queryRag(query);
+      res.json(result);
+    } catch (err) {
+      console.error("RAG query error:", err);
+      res.status(500).json({ message: "질문 처리에 실패했습니다" });
+    }
+  });
+
+  // Search documents
+  app.post("/api/knowledge/search", async (req, res) => {
+    try {
+      const { query, topK = 5 } = req.body;
+      
+      if (!query || typeof query !== 'string') {
+        return res.status(400).json({ message: "검색어를 입력해주세요" });
+      }
+
+      const searchContext = await ragService.hybridSearch(query, topK);
+      res.json(searchContext);
+    } catch (err) {
+      console.error("Knowledge search error:", err);
+      res.status(500).json({ message: "검색에 실패했습니다" });
+    }
+  });
+
+  // Delete knowledge document
+  app.delete("/api/knowledge/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      
+      const [doc] = await db.select().from(knowledgeDocuments).where(eq(knowledgeDocuments.id, id)).limit(1);
+      
+      if (!doc) {
+        return res.status(404).json({ message: "문서를 찾을 수 없습니다" });
+      }
+
+      // Delete chunks first (cascade should handle this, but explicit)
+      await db.delete(documentChunks).where(eq(documentChunks.documentId, id));
+      
+      // Delete document
+      await db.delete(knowledgeDocuments).where(eq(knowledgeDocuments.id, id));
+
+      res.json({ message: "문서가 삭제되었습니다" });
+    } catch (err) {
+      console.error("Delete knowledge document error:", err);
+      res.status(500).json({ message: "문서 삭제에 실패했습니다" });
+    }
+  });
+
   return httpServer;
+}
+
+// Async document processing function
+async function processDocument(docId: number, buffer: Buffer, fileName: string): Promise<void> {
+  try {
+    // Parse document
+    const parsed = await documentParser.parseDocument(buffer, fileName, '');
+    
+    // Update document with page count
+    await db.update(knowledgeDocuments)
+      .set({ 
+        pageCount: parsed.pageCount,
+        hasOcr: parsed.hasOcr,
+      })
+      .where(eq(knowledgeDocuments.id, docId));
+
+    // Chunk the text
+    const chunks = documentParser.chunkText(parsed.text, {
+      chunkSize: 500,
+      chunkOverlap: 50,
+    });
+
+    if (chunks.length === 0) {
+      await db.update(knowledgeDocuments)
+        .set({ 
+          status: 'error',
+          errorMessage: '문서에서 텍스트를 추출할 수 없습니다',
+        })
+        .where(eq(knowledgeDocuments.id, docId));
+      return;
+    }
+
+    // Generate embeddings for chunks
+    const embeddings = await embeddingService.generateEmbeddings(chunks);
+
+    // Insert chunks with embeddings
+    for (let i = 0; i < chunks.length; i++) {
+      const embedding = embeddings[i];
+      await db.insert(documentChunks).values({
+        documentId: docId,
+        chunkIndex: i,
+        content: chunks[i],
+        pageNumber: Math.floor((i / chunks.length) * parsed.pageCount) + 1,
+        embedding: embedding.embedding.length > 0 ? JSON.stringify(embedding.embedding) : null,
+      });
+    }
+
+    // Update document status
+    await db.update(knowledgeDocuments)
+      .set({ 
+        status: 'ready',
+        chunkCount: chunks.length,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeDocuments.id, docId));
+
+    console.log(`Document ${docId} processed successfully: ${chunks.length} chunks`);
+  } catch (error: any) {
+    console.error(`Document ${docId} processing error:`, error);
+    await db.update(knowledgeDocuments)
+      .set({ 
+        status: 'error',
+        errorMessage: error.message || '문서 처리 중 오류가 발생했습니다',
+      })
+      .where(eq(knowledgeDocuments.id, docId));
+  }
 }
