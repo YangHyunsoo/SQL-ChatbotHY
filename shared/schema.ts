@@ -149,3 +149,80 @@ export interface ColumnInfo {
   nullable: boolean;
   sampleValues: string[];
 }
+
+// === KNOWLEDGE BASE (RAG) ===
+
+export const knowledgeDocuments = pgTable("knowledge_documents", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  fileName: text("file_name").notNull(),
+  fileType: text("file_type").notNull(), // 'pdf', 'doc', 'docx', 'ppt', 'pptx'
+  fileSize: integer("file_size").notNull(), // bytes
+  pageCount: integer("page_count").default(0),
+  chunkCount: integer("chunk_count").default(0),
+  status: text("status").notNull().default("processing"), // 'processing', 'ready', 'error'
+  errorMessage: text("error_message"),
+  hasOcr: boolean("has_ocr").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const documentChunks = pgTable("document_chunks", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id").references(() => knowledgeDocuments.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text("content").notNull(),
+  pageNumber: integer("page_number"),
+  embedding: text("embedding"), // JSON array of floats (vector)
+  metadata: text("metadata"), // JSON string for extra metadata
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const knowledgeDocumentsRelations = relations(knowledgeDocuments, ({ many }) => ({
+  chunks: many(documentChunks),
+}));
+
+export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
+  document: one(knowledgeDocuments, {
+    fields: [documentChunks.documentId],
+    references: [knowledgeDocuments.id],
+  }),
+}));
+
+export const insertKnowledgeDocumentSchema = createInsertSchema(knowledgeDocuments).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true 
+});
+export const insertDocumentChunkSchema = createInsertSchema(documentChunks).omit({ 
+  id: true, 
+  createdAt: true 
+});
+
+export type KnowledgeDocument = typeof knowledgeDocuments.$inferSelect;
+export type InsertKnowledgeDocument = z.infer<typeof insertKnowledgeDocumentSchema>;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+export type InsertDocumentChunk = z.infer<typeof insertDocumentChunkSchema>;
+
+// === KNOWLEDGE BASE API TYPES ===
+
+export interface KnowledgeUploadResponse {
+  success: boolean;
+  document?: KnowledgeDocument;
+  error?: string;
+}
+
+export interface RagSearchResult {
+  chunkId: number;
+  documentId: number;
+  documentName: string;
+  content: string;
+  pageNumber?: number;
+  score: number;
+}
+
+export interface RagQueryResponse {
+  answer: string;
+  sources: RagSearchResult[];
+  error?: string;
+}
