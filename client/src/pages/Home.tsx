@@ -571,6 +571,30 @@ export default function Home() {
       </div>
 
       <div className="sticky bottom-0 w-full bg-gradient-to-t from-background via-background to-transparent pt-6 sm:pt-10 pb-3 sm:pb-4 px-2 sm:px-4 z-40">
+        <div className="max-w-4xl mx-auto mb-2">
+          <button
+            onClick={() => setSettings(prev => ({ ...prev, useRag: !prev.useRag }))}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+              settings.useRag 
+                ? 'bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30' 
+                : 'bg-muted text-muted-foreground border border-border hover:bg-muted/80'
+            }`}
+            data-testid="button-mode-toggle"
+          >
+            {settings.useRag ? (
+              <>
+                <BookOpen className="w-3.5 h-3.5" />
+                지식베이스 모드
+              </>
+            ) : (
+              <>
+                <Database className="w-3.5 h-3.5" />
+                SQL 분석 모드
+              </>
+            )}
+            <span className="text-[10px] opacity-60">(클릭하여 전환)</span>
+          </button>
+        </div>
         <ChatInput onSend={handleSend} isLoading={chatMutation.isPending} />
       </div>
     </div>
