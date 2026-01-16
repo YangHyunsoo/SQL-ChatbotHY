@@ -31,6 +31,16 @@ const knowledgeUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB per file
 });
 
+// Fix Korean filename encoding (multer returns latin1 encoded filenames)
+function decodeFilename(filename: string): string {
+  try {
+    // Try to decode from latin1 to UTF-8
+    return Buffer.from(filename, 'latin1').toString('utf8');
+  } catch {
+    return filename;
+  }
+}
+
 function inferColumnType(values: string[]): 'text' | 'number' | 'date' | 'boolean' {
   const nonEmptyValues = values.filter(v => v !== null && v !== undefined && v.trim() !== '');
   if (nonEmptyValues.length === 0) return 'text';
@@ -883,10 +893,13 @@ ${FEW_SHOT_EXAMPLES}
 
       for (const file of files) {
         try {
+          // Decode filename for proper Korean support
+          const decodedFilename = decodeFilename(file.originalname);
+          
           // Validate file type
-          if (!documentParser.isValidFileType(file.originalname)) {
+          if (!documentParser.isValidFileType(decodedFilename)) {
             errors.push({
-              fileName: file.originalname,
+              fileName: decodedFilename,
               error: "지원하지 않는 파일 형식입니다 (PDF, DOC, DOCX, PPT, PPTX만 가능)"
             });
             continue;
@@ -894,26 +907,26 @@ ${FEW_SHOT_EXAMPLES}
 
           // Create document record
           const [newDoc] = await db.insert(knowledgeDocuments).values({
-            name: file.originalname.replace(/\.[^/.]+$/, ''),
-            fileName: file.originalname,
-            fileType: documentParser.getFileType(file.originalname),
+            name: decodedFilename.replace(/\.[^/.]+$/, ''),
+            fileName: decodedFilename,
+            fileType: documentParser.getFileType(decodedFilename),
             fileSize: file.size,
             status: 'processing',
           }).returning();
 
           // Process document asynchronously
-          processDocument(newDoc.id, file.buffer, file.originalname).catch(err => {
+          processDocument(newDoc.id, file.buffer, decodedFilename).catch(err => {
             console.error(`Failed to process document ${newDoc.id}:`, err);
           });
 
           results.push({
             id: newDoc.id,
-            fileName: file.originalname,
+            fileName: decodedFilename,
             status: 'processing'
           });
         } catch (fileErr: any) {
           errors.push({
-            fileName: file.originalname,
+            fileName: decodeFilename(file.originalname),
             error: fileErr.message
           });
         }
