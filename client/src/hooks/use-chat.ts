@@ -31,7 +31,7 @@ export function useChat() {
       
       // Use RAG endpoint if enabled
       if (useRag) {
-        const res = await fetch('/api/knowledge/query', {
+        const res = await fetch('/api/rag/query', {
           method: 'POST',
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: message }),
