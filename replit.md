@@ -86,15 +86,41 @@ The server handles API requests, serves the static frontend in production, and m
   - Full Korean filename and column name support (Unicode ranges \uAC00-\uD7A3)
 
 ### AI Integration
-- **Provider**: OpenRouter API (OpenAI-compatible interface)
-- **Model**: mistralai/devstral-2512:free (optimized for low-spec systems)
-- **Purpose**: Natural language to SQL translation
+- **Dual Mode Execution**: Cloud (OpenRouter) OR Local (Ollama)
+- **Provider Options**:
+  - **OpenRouter API**: Cloud-based via OpenAI-compatible interface
+  - **Ollama** (`server/ollama-service.ts`): Local AI model execution
+- **Default Model**: mistralai/devstral-2512:free (cloud) or llama3.2:3b (local)
+- **Purpose**: Natural language to SQL translation and RAG responses
 - **Features**:
   - Enhanced schema metadata with column types and descriptions
   - 16 few-shot examples for improved SQL accuracy
   - SQL error auto-retry with LLM-based fix (max 2 retries)
   - Dynamic schema includes user-uploaded datasets
 - **Rate Limiting**: Batch processing utilities with exponential backoff retry logic
+
+### Ollama Local AI (v4.0)
+- **Service Module** (`server/ollama-service.ts`):
+  - HTTP API communication with Ollama server
+  - Connection status checking (auto-refresh every 10 seconds)
+  - Model listing from local Ollama installation
+  - Text generation via `/api/generate` endpoint
+- **Recommended Models for 8GB RAM**:
+  - llama3.2:3b (2GB) - Primary recommendation
+  - gemma2:2b (1.5GB) - Lightweight option
+  - phi3:mini (2.3GB) - Good balance
+  - qwen2:1.5b (1GB) - Minimal footprint
+- **Configuration**:
+  - baseUrl: http://localhost:11434 (default)
+  - Toggle between Ollama (local) and OpenRouter (cloud)
+  - localStorage persistence for settings
+- **API Endpoints**:
+  - `GET /api/ollama/config` - Current configuration
+  - `PUT /api/ollama/config` - Update settings
+  - `GET /api/ollama/status` - Connection status
+  - `GET /api/ollama/models` - Installed models list
+  - `GET /api/ollama/recommended-models` - Models for low-spec systems
+- **Setup**: User must install Ollama separately (`curl -fsSL https://ollama.com/install.sh | sh`)
 
 ### Knowledge Base & RAG System (v3.1)
 - **Document Parsing** (`server/document-parser.ts`):
