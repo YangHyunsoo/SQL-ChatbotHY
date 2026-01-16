@@ -61,10 +61,20 @@ export default function Home() {
     }
     return true;
   });
-  const [settings, setSettings] = useState<AppSettings>({
-    modelName: 'mistralai/mistral-7b-instruct:free',
-    temperature: 0,
-    useRag: false
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('sqlchat_settings');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {}
+      }
+    }
+    return {
+      modelName: 'mistralai/mistral-7b-instruct:free',
+      temperature: 0,
+      useRag: false
+    };
   });
   const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
@@ -210,6 +220,11 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem('sidebarCollapsed', isSidebarCollapsed.toString());
   }, [isSidebarCollapsed]);
+
+  // Settings persistence
+  useEffect(() => {
+    localStorage.setItem('sqlchat_settings', JSON.stringify(settings));
+  }, [settings]);
 
   // Scroll to bottom on new messages
   useEffect(() => {

@@ -72,16 +72,16 @@ export function SettingsPage({ settings, onSettingsChange }: SettingsPageProps) 
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="w-5 h-5" />
-            RAG 설정
+            지식베이스 검색 (RAG)
           </CardTitle>
-          <CardDescription>검색 증강 생성(RAG) 관련 설정</CardDescription>
+          <CardDescription>문서 기반 질의응답 설정</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label>RAG 사용</Label>
+              <Label>지식베이스 검색 모드</Label>
               <p className="text-xs text-muted-foreground">
-                스키마 검색을 통해 더 정확한 SQL 생성
+                활성화하면 SQL 쿼리 대신 등록된 문서에서 답변을 검색합니다
               </p>
             </div>
             <Switch
@@ -90,6 +90,13 @@ export function SettingsPage({ settings, onSettingsChange }: SettingsPageProps) 
               data-testid="switch-rag"
             />
           </div>
+          {settings.useRag && (
+            <div className="mt-4 p-3 rounded-lg bg-primary/10 border border-primary/20">
+              <p className="text-sm text-primary">
+                지식베이스 모드가 활성화되었습니다. 채팅에서 등록된 문서 내용을 검색하고 요약, 발췌 등의 답변을 받을 수 있습니다.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
