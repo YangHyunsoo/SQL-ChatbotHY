@@ -58,12 +58,12 @@ async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
   let pageCount = 1;
   
   try {
-    // Dynamic import for pdf-parse
+    // Dynamic import for pdf-parse (CommonJS compatibility)
     if (!pdfParseLib) {
-      const module = await import('pdf-parse');
+      const module = await import('pdf-parse') as any;
       pdfParseLib = module.default || module;
     }
-    const data = await pdfParseLib(buffer);
+    const data = await (pdfParseLib as any)(buffer);
     const text = data.text || '';
     pageCount = data.numpages || 1;
     

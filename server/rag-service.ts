@@ -9,7 +9,12 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
 });
 
-const MODEL = "mistralai/devstral-2512:free";
+// 한국어 문서 요약 모델 - 우선순위별 폴백
+const RAG_MODELS = [
+  "google/gemini-2.0-flash-exp:free",       // Google Gemini - 안정적, 다국어 지원
+  "meta-llama/llama-3.3-70b-instruct:free", // Llama 3.3 - 대용량, 다국어
+  "mistralai/devstral-2512:free",           // Mistral Devstral - 백업
+];
 
 export interface SearchResult {
   chunkId: number;
@@ -164,22 +169,32 @@ ${contextText}
 
 위 문서 내용을 바탕으로 답변해주세요.`;
 
-  try {
-    const response = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.2,
-      max_tokens: 2000,
-    });
-    
-    return response.choices[0]?.message?.content || '응답을 생성할 수 없습니다.';
-  } catch (error) {
-    console.error('RAG response generation error:', error);
-    return '응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+  // 여러 모델 폴백으로 안정성 향상
+  for (const model of RAG_MODELS) {
+    try {
+      console.log(`RAG using model: ${model}`);
+      const response = await openai.chat.completions.create({
+        model: model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 2000,
+      });
+      
+      const content = response.choices[0]?.message?.content;
+      if (content) {
+        return content;
+      }
+    } catch (error: any) {
+      console.error(`RAG model ${model} error:`, error.message || error);
+      // 다음 모델로 폴백
+      continue;
+    }
   }
+  
+  return '응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 }
 
 export async function queryRag(query: string): Promise<{

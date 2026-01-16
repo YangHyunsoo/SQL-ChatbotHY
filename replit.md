@@ -96,20 +96,27 @@ The server handles API requests, serves the static frontend in production, and m
   - Dynamic schema includes user-uploaded datasets
 - **Rate Limiting**: Batch processing utilities with exponential backoff retry logic
 
-### Knowledge Base & RAG System (v3.0)
+### Knowledge Base & RAG System (v3.1)
 - **Document Parsing** (`server/document-parser.ts`):
-  - PDF parsing with pdf-parse library
+  - PDF parsing with pdf-parse library (dynamic import for CommonJS compatibility)
   - DOC/DOCX extraction with mammoth
   - PPT/PPTX extraction with officeparser
   - OCR support for image-based PDFs using Tesseract.js (Korean + English)
-- **Embedding Service** (`server/embedding-service.ts`):
+  - Automatic OCR fallback when PDF text extraction fails
+- **Search Service** (`server/embedding-service.ts`):
   - Text chunking: 500 tokens with 50-token overlap for context preservation
-  - Vectorization via OpenRouter's text-embedding-3-small model
-  - Batch processing for efficient embedding generation
+  - **Keyword-based search** (OpenRouter doesn't support embeddings API)
+  - Tokenization with Korean character support (한글 유니코드 범위)
+  - Exact and partial keyword matching with scoring
 - **RAG Service** (`server/rag-service.ts`):
-  - Hybrid search combining vector similarity (70%) + keyword matching (30%)
+  - Keyword-based similarity search across document chunks
   - Retrieves top 5 most relevant chunks per query
   - Source attribution with document name, page number, and relevance score
+  - **Multi-model fallback for stability**:
+    1. Google Gemini 2.0 Flash (primary, multilingual)
+    2. Meta Llama 3.3 70B (fallback, multilingual)
+    3. Mistral Devstral (backup)
+  - Intent detection for summary/excerpt/content queries
 - **Database Tables**:
   - `knowledge_documents` - Document metadata (name, type, status, chunk count)
   - `document_chunks` - Vectorized text chunks with pgvector embeddings
