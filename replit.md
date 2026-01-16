@@ -22,9 +22,10 @@ The frontend is organized as a single-page application with a chat interface as 
 
 Key UI Components:
 - **Sidebar** (`client/src/components/Sidebar.tsx`): Conversation history, new chat button, file upload, dark/light theme toggle
-- **TopNav** (`client/src/components/TopNav.tsx`): Tab navigation (채팅, 데이터베이스, 설정)
+- **TopNav** (`client/src/components/TopNav.tsx`): Tab navigation (채팅, 데이터베이스, 지식베이스, 설정)
 - **SettingsPage** (`client/src/components/SettingsPage.tsx`): Model configuration (temperature, RAG toggle)
 - **DatabasePage** (`client/src/components/DatabasePage.tsx`): Database table metadata display
+- **KnowledgeBasePage** (`client/src/components/KnowledgeBasePage.tsx`): Document upload and management for RAG
 
 Features:
 - Conversation persistence via localStorage (max 20 conversations, 80 messages each)
@@ -94,6 +95,34 @@ The server handles API requests, serves the static frontend in production, and m
   - SQL error auto-retry with LLM-based fix (max 2 retries)
   - Dynamic schema includes user-uploaded datasets
 - **Rate Limiting**: Batch processing utilities with exponential backoff retry logic
+
+### Knowledge Base & RAG System (v3.0)
+- **Document Parsing** (`server/document-parser.ts`):
+  - PDF parsing with pdf-parse library
+  - DOC/DOCX extraction with mammoth
+  - PPT/PPTX extraction with officeparser
+  - OCR support for image-based PDFs using Tesseract.js (Korean + English)
+- **Embedding Service** (`server/embedding-service.ts`):
+  - Text chunking: 500 tokens with 50-token overlap for context preservation
+  - Vectorization via OpenRouter's text-embedding-3-small model
+  - Batch processing for efficient embedding generation
+- **RAG Service** (`server/rag-service.ts`):
+  - Hybrid search combining vector similarity (70%) + keyword matching (30%)
+  - Retrieves top 5 most relevant chunks per query
+  - Source attribution with document name, page number, and relevance score
+- **Database Tables**:
+  - `knowledge_documents` - Document metadata (name, type, status, chunk count)
+  - `document_chunks` - Vectorized text chunks with pgvector embeddings
+- **API Endpoints**:
+  - `POST /api/knowledge-base/upload` - Multi-file upload (10MB per file, 500MB total)
+  - `GET /api/knowledge-base/documents` - List all documents with status
+  - `DELETE /api/knowledge-base/documents/:id` - Delete document and chunks
+  - `GET /api/knowledge-base/stats` - Document statistics
+  - `POST /api/rag/query` - RAG query with source retrieval
+- **Frontend Integration**:
+  - "RAG 사용" toggle in Settings page switches between SQL and RAG modes
+  - Chat displays sources with relevance scores and page numbers
+  - Knowledge Base page shows upload progress and document status
 
 ### Key Design Decisions
 

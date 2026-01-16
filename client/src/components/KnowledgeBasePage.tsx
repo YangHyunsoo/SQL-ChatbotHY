@@ -63,7 +63,7 @@ export function KnowledgeBasePage() {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const { data: documents = [], isLoading } = useQuery<KnowledgeDocument[]>({
-    queryKey: ['/api/knowledge'],
+    queryKey: ['/api/knowledge-base/documents'],
     refetchInterval: 5000, // Poll for status updates
   });
 
@@ -72,7 +72,7 @@ export function KnowledgeBasePage() {
     totalChunks: number;
     documentsByStatus: Record<string, number>;
   }>({
-    queryKey: ['/api/knowledge/stats'],
+    queryKey: ['/api/knowledge-base/stats'],
     refetchInterval: 10000,
   });
 
@@ -83,7 +83,7 @@ export function KnowledgeBasePage() {
         formData.append('files', file);
       });
       
-      const response = await fetch('/api/knowledge/upload', {
+      const response = await fetch('/api/knowledge-base/upload', {
         method: 'POST',
         body: formData,
       });
@@ -96,8 +96,8 @@ export function KnowledgeBasePage() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/knowledge'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/knowledge/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/knowledge-base/documents'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/knowledge-base/stats'] });
       setUploadProgress(100);
       setTimeout(() => setUploadProgress(0), 1000);
     },
@@ -108,13 +108,13 @@ export function KnowledgeBasePage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(`/api/knowledge/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/knowledge-base/documents/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Failed to delete');
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/knowledge'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/knowledge/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/knowledge-base/documents'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/knowledge-base/stats'] });
     },
   });
 

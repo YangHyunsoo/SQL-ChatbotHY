@@ -12,7 +12,7 @@ import { DatabasePage } from "@/components/DatabasePage";
 import { KnowledgeBasePage } from "@/components/KnowledgeBasePage";
 import { FileUploadDialog } from "@/components/FileUploadDialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bot, User, AlertCircle, Sparkles, Terminal, Database } from "lucide-react";
+import { Bot, User, AlertCircle, Sparkles, Terminal, Database, BookOpen } from "lucide-react";
 
 interface SampleQuestionsResponse {
   questions: string[];
@@ -433,7 +433,10 @@ export default function Home() {
                           className="w-full mt-3"
                         >
                           <div className="p-3 rounded-lg bg-muted/50 border border-border/50">
-                            <p className="text-xs font-medium text-muted-foreground mb-2">📚 출처</p>
+                            <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                              <BookOpen className="w-3 h-3" />
+                              출처
+                            </p>
                             <div className="space-y-2">
                               {msg.sources.slice(0, 3).map((source, idx) => (
                                 <div key={source.chunkId} className="text-xs p-2 rounded bg-background border border-border/30">
