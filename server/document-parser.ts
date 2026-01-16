@@ -1,12 +1,18 @@
 import officeParser from 'officeparser';
 import mammoth from 'mammoth';
-import Tesseract from 'tesseract.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+// Dynamic import for pdf-parse (CommonJS module)
+let pdfParse: ((buffer: Buffer) => Promise<any>) | null = null;
+async function getPdfParse(): Promise<(buffer: Buffer) => Promise<any>> {
+  if (!pdfParse) {
+    // @ts-ignore - pdf-parse has complex exports
+    const module = await import('pdf-parse');
+    pdfParse = (module as any).default || module;
+  }
+  return pdfParse!;
+}
 
 export interface ParsedDocument {
   text: string;
@@ -53,23 +59,18 @@ export async function parseDocument(
 
 async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
   try {
-    const data = await pdfParse(buffer);
-    let text = data.text || '';
-    let hasOcr = false;
+    const parser = await getPdfParse();
+    const data = await parser(buffer);
+    const text = data.text || '';
     
-    if (!text.trim() || text.trim().length < 100) {
-      console.log('PDF appears to be image-based, attempting OCR...');
-      const ocrResult = await performOcrOnPdf(buffer);
-      if (ocrResult.text.length > text.length) {
-        text = ocrResult.text;
-        hasOcr = true;
-      }
+    if (!text.trim()) {
+      throw new Error('PDF에서 텍스트를 추출할 수 없습니다. 이미지 기반 PDF일 수 있습니다.');
     }
     
     return {
       text: cleanText(text),
       pageCount: data.numpages || 1,
-      hasOcr,
+      hasOcr: false,
       metadata: {
         info: data.info,
         version: data.version,
@@ -77,43 +78,7 @@ async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
     };
   } catch (error) {
     console.error('PDF parsing error:', error);
-    try {
-      const ocrResult = await performOcrOnPdf(buffer);
-      return {
-        text: cleanText(ocrResult.text),
-        pageCount: 1,
-        hasOcr: true,
-      };
-    } catch (ocrError) {
-      throw new Error('PDF 파싱에 실패했습니다. OCR도 실패했습니다.');
-    }
-  }
-}
-
-async function performOcrOnPdf(buffer: Buffer): Promise<{ text: string }> {
-  try {
-    const tempDir = '/tmp/ocr';
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-    
-    const tempPdfPath = path.join(tempDir, `temp_${Date.now()}.pdf`);
-    fs.writeFileSync(tempPdfPath, buffer);
-    
-    const worker = await Tesseract.createWorker('kor+eng');
-    
-    try {
-      const result = await worker.recognize(tempPdfPath);
-      return { text: result.data.text };
-    } finally {
-      await worker.terminate();
-      if (fs.existsSync(tempPdfPath)) {
-        fs.unlinkSync(tempPdfPath);
-      }
-    }
-  } catch (error) {
-    console.error('OCR error:', error);
-    return { text: '' };
+    throw new Error('PDF 파싱에 실패했습니다. 텍스트 기반 PDF만 지원됩니다.');
   }
 }
 
