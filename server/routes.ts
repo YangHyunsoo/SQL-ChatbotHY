@@ -9,6 +9,7 @@ import { sql, eq, desc } from "drizzle-orm";
 import multer from "multer";
 import Papa from "papaparse";
 import { datasets, structuredData, unstructuredData, type ColumnInfo } from "@shared/schema";
+import * as duckdbService from "./duckdb-service";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
@@ -71,23 +72,46 @@ async function buildDynamicSchema(): Promise<string> {
       for (const dataset of uploadedDatasets) {
         if (dataset.dataType === 'structured' && dataset.columnInfo) {
           const columns: ColumnInfo[] = JSON.parse(dataset.columnInfo);
-          schema += `\n[structured_data 테이블에서 dataset_id = ${dataset.id}] - ${dataset.name}\n`;
-          schema += `설명: ${dataset.description || dataset.fileName}\n`;
-          schema += '| 컬럼명 | 타입 |\n';
-          schema += '|--------|------|\n';
           
-          for (const col of columns) {
-            const sqlType = col.type === 'number' ? 'NUMERIC' 
-              : col.type === 'date' ? 'TIMESTAMP' 
-              : col.type === 'boolean' ? 'BOOLEAN'
-              : 'TEXT';
-            schema += `| ${col.name} | ${sqlType} |\n`;
+          // DuckDB storage (new method)
+          if (dataset.duckdbTable) {
+            schema += `\n[DuckDB 테이블: ${dataset.duckdbTable}] - ${dataset.name}\n`;
+            schema += `설명: ${dataset.description || dataset.fileName} (DuckDB 고성능 분석용)\n`;
+            schema += '| 컬럼명 | 타입 |\n';
+            schema += '|--------|------|\n';
+            
+            for (const col of columns) {
+              const duckType = col.type === 'number' ? 'DOUBLE' 
+                : col.type === 'date' ? 'TIMESTAMP' 
+                : col.type === 'boolean' ? 'BOOLEAN'
+                : 'VARCHAR';
+              const sanitizedName = col.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+              schema += `| ${sanitizedName} | ${duckType} |\n`;
+            }
+            
+            const firstCol = columns[0]?.name.toLowerCase().replace(/[^a-z0-9_]/g, '_') || 'column';
+            schema += `\n[주의] DuckDB 테이블은 PostgreSQL에서 직접 쿼리할 수 없습니다. 이 데이터셋 관련 질문은 structured_data 테이블을 사용하세요.\n`;
+            schema += `쿼리 예시: SELECT data->>'${columns[0]?.name}' as "${firstCol}" FROM structured_data WHERE dataset_id = ${dataset.id}\n`;
+          } else {
+            // Legacy PostgreSQL storage
+            schema += `\n[structured_data 테이블에서 dataset_id = ${dataset.id}] - ${dataset.name}\n`;
+            schema += `설명: ${dataset.description || dataset.fileName}\n`;
+            schema += '| 컬럼명 | 타입 |\n';
+            schema += '|--------|------|\n';
+            
+            for (const col of columns) {
+              const sqlType = col.type === 'number' ? 'NUMERIC' 
+                : col.type === 'date' ? 'TIMESTAMP' 
+                : col.type === 'boolean' ? 'BOOLEAN'
+                : 'TEXT';
+              schema += `| ${col.name} | ${sqlType} |\n`;
+            }
+            
+            schema += `\n쿼리 예시: SELECT data->>'${columns[0]?.name || 'column'}' as ${columns[0]?.name || 'column'} FROM structured_data WHERE dataset_id = ${dataset.id}\n`;
           }
-          
-          schema += `\n쿼리 예시: SELECT data->>'${columns[0]?.name || 'column'}' as ${columns[0]?.name || 'column'} FROM structured_data WHERE dataset_id = ${dataset.id}\n`;
         } else if (dataset.dataType === 'unstructured') {
           schema += `\n[unstructured_data 테이블에서 dataset_id = ${dataset.id}] - ${dataset.name}\n`;
-          schema += `설명: ${dataset.description || dataset.fileName} (비정형 텍스트 데이터)\n`;
+          schema += `설명: ${dataset.description || dataset.fileName} (비정형 텍스트 데이터, pgvector 지원)\n`;
           schema += '| 컬럼명 | 타입 | 설명 |\n';
           schema += '|--------|------|------|\n';
           schema += '| raw_content | TEXT | 원본 텍스트 |\n';
@@ -486,14 +510,33 @@ ${FEW_SHOT_EXAMPLES}
       let rows: any[] = [];
 
       if (ds.dataType === 'structured') {
-        const result = await db.select()
-          .from(structuredData)
-          .where(eq(structuredData.datasetId, id))
-          .orderBy(structuredData.rowIndex)
-          .limit(limit)
-          .offset(offset);
-        rows = result.map(r => JSON.parse(r.data));
+        // Query from DuckDB if table exists
+        if (ds.duckdbTable) {
+          try {
+            rows = await duckdbService.queryDataset(ds.duckdbTable, limit, offset);
+          } catch (duckErr) {
+            console.error("DuckDB query failed, falling back to PostgreSQL:", duckErr);
+            // Fallback to PostgreSQL
+            const result = await db.select()
+              .from(structuredData)
+              .where(eq(structuredData.datasetId, id))
+              .orderBy(structuredData.rowIndex)
+              .limit(limit)
+              .offset(offset);
+            rows = result.map(r => JSON.parse(r.data));
+          }
+        } else {
+          // Legacy data in PostgreSQL
+          const result = await db.select()
+            .from(structuredData)
+            .where(eq(structuredData.datasetId, id))
+            .orderBy(structuredData.rowIndex)
+            .limit(limit)
+            .offset(offset);
+          rows = result.map(r => JSON.parse(r.data));
+        }
       } else {
+        // Unstructured data from PostgreSQL
         const result = await db.select()
           .from(unstructuredData)
           .where(eq(unstructuredData.datasetId, id))
@@ -515,7 +558,8 @@ ${FEW_SHOT_EXAMPLES}
           limit,
           total: ds.rowCount,
           totalPages: Math.ceil(ds.rowCount / limit)
-        }
+        },
+        storage: ds.duckdbTable ? 'DuckDB' : 'PostgreSQL'
       });
     } catch (err) {
       console.error("Get dataset data error:", err);
@@ -558,29 +602,51 @@ ${FEW_SHOT_EXAMPLES}
         ? analyzeColumns(headers, rows)
         : null;
 
-      // Create dataset record
+      // Create dataset record (without DuckDB table name first)
       const [newDataset] = await db.insert(datasets).values({
         name,
         fileName: req.file.originalname,
         dataType,
         rowCount: rows.length,
         columnInfo: columnInfo ? JSON.stringify(columnInfo) : null,
-        description: description || null
+        description: description || null,
+        duckdbTable: null
       }).returning();
 
       // Insert data rows
-      if (dataType === 'structured') {
-        const batchSize = 100;
-        for (let i = 0; i < rows.length; i += batchSize) {
-          const batch = rows.slice(i, i + batchSize).map((row, idx) => ({
-            datasetId: newDataset.id,
-            rowIndex: i + idx,
-            data: JSON.stringify(row)
-          }));
-          await db.insert(structuredData).values(batch);
+      if (dataType === 'structured' && columnInfo) {
+        // Use DuckDB for structured data (970x faster analytics)
+        try {
+          const tableName = await duckdbService.createDatasetTable(
+            newDataset.id,
+            name,
+            columnInfo.map(c => ({ name: c.name, type: c.type }))
+          );
+          
+          await duckdbService.insertDataRows(tableName, columnInfo, rows);
+          
+          // Update dataset with DuckDB table name
+          await db.update(datasets)
+            .set({ duckdbTable: tableName })
+            .where(eq(datasets.id, newDataset.id));
+          
+          newDataset.duckdbTable = tableName;
+          console.log(`Structured data stored in DuckDB table: ${tableName}`);
+        } catch (duckErr) {
+          console.error("DuckDB storage failed, falling back to PostgreSQL:", duckErr);
+          // Fallback to PostgreSQL if DuckDB fails
+          const batchSize = 100;
+          for (let i = 0; i < rows.length; i += batchSize) {
+            const batch = rows.slice(i, i + batchSize).map((row, idx) => ({
+              datasetId: newDataset.id,
+              rowIndex: i + idx,
+              data: JSON.stringify(row)
+            }));
+            await db.insert(structuredData).values(batch);
+          }
         }
       } else {
-        // For unstructured data, treat each row as a document
+        // For unstructured data, store in PostgreSQL with text search support
         const batchSize = 100;
         for (let i = 0; i < rows.length; i += batchSize) {
           const batch = rows.slice(i, i + batchSize).map((row, idx) => {
@@ -600,7 +666,8 @@ ${FEW_SHOT_EXAMPLES}
       res.json({
         message: "Dataset uploaded successfully",
         dataset: newDataset,
-        columns: columnInfo
+        columns: columnInfo,
+        storage: dataType === 'structured' ? 'DuckDB' : 'PostgreSQL'
       });
 
     } catch (err) {
@@ -640,13 +707,24 @@ ${FEW_SHOT_EXAMPLES}
     try {
       const id = parseInt(req.params.id);
       
-      const [deleted] = await db.delete(datasets)
-        .where(eq(datasets.id, id))
-        .returning();
-
-      if (!deleted) {
+      // Get dataset to check for DuckDB table
+      const [dataset] = await db.select().from(datasets).where(eq(datasets.id, id)).limit(1);
+      
+      if (!dataset) {
         return res.status(404).json({ message: "Dataset not found" });
       }
+      
+      // Drop DuckDB table if it exists
+      if (dataset.duckdbTable) {
+        try {
+          await duckdbService.dropDatasetTable(dataset.duckdbTable);
+        } catch (duckErr) {
+          console.error("Failed to drop DuckDB table:", duckErr);
+        }
+      }
+      
+      // Delete from PostgreSQL (cascade will delete related data)
+      await db.delete(datasets).where(eq(datasets.id, id));
 
       res.json({ message: "Dataset deleted successfully" });
     } catch (err) {

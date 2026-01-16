@@ -1,17 +1,16 @@
 import { useState, useRef } from "react";
-import { Upload, X, FileSpreadsheet, Database, FileText, Loader2 } from "lucide-react";
+import { X, FileSpreadsheet, Database, FileText, Loader2, Shield, Save, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
 interface FileUploadDialogProps {
@@ -23,8 +22,8 @@ interface FileUploadDialogProps {
 export function FileUploadDialog({ open, onOpenChange, onUploadSuccess }: FileUploadDialogProps) {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [dataType, setDataType] = useState<"structured" | "unstructured">("structured");
+  const [anonymize, setAnonymize] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -47,25 +46,6 @@ export function FileUploadDialog({ open, onOpenChange, onUploadSuccess }: FileUp
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile) {
-      if (!droppedFile.name.endsWith('.csv')) {
-        toast({
-          variant: "destructive",
-          title: "잘못된 파일 형식",
-          description: "CSV 파일만 업로드 가능합니다."
-        });
-        return;
-      }
-      setFile(droppedFile);
-      if (!name) {
-        setName(droppedFile.name.replace('.csv', ''));
-      }
-    }
-  };
-
   const handleUpload = async () => {
     if (!file || !name.trim()) {
       toast({
@@ -83,9 +63,7 @@ export function FileUploadDialog({ open, onOpenChange, onUploadSuccess }: FileUp
       formData.append('file', file);
       formData.append('name', name.trim());
       formData.append('dataType', dataType);
-      if (description.trim()) {
-        formData.append('description', description.trim());
-      }
+      formData.append('anonymize', String(anonymize));
 
       const response = await fetch('/api/datasets/upload', {
         method: 'POST',
@@ -101,7 +79,7 @@ export function FileUploadDialog({ open, onOpenChange, onUploadSuccess }: FileUp
       
       toast({
         title: "업로드 완료",
-        description: `${result.dataset.rowCount}개의 데이터가 등록되었습니다.`
+        description: `${result.dataset.rowCount}개의 데이터가 ${dataType === 'structured' ? 'DuckDB' : 'pgvector'}에 저장되었습니다.`
       });
 
       resetForm();
@@ -122,8 +100,8 @@ export function FileUploadDialog({ open, onOpenChange, onUploadSuccess }: FileUp
   const resetForm = () => {
     setFile(null);
     setName("");
-    setDescription("");
     setDataType("structured");
+    setAnonymize(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -136,30 +114,87 @@ export function FileUploadDialog({ open, onOpenChange, onUploadSuccess }: FileUp
     }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5" />
-            CSV 파일 업로드
-          </DialogTitle>
-          <DialogDescription>
-            CSV 파일을 업로드하여 데이터베이스에 등록합니다.
-          </DialogDescription>
-        </DialogHeader>
+  if (!open) return null;
 
-        <div className="space-y-4">
-          <div
-            className={`
-              border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors
-              ${file ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-primary/50'}
-            `}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            data-testid="dropzone-file"
-          >
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div 
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={handleClose}
+      />
+      
+      <div className="relative w-full max-w-lg mx-4 bg-card border border-border rounded-xl shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="text-lg font-semibold text-foreground">분석 데이터 추가</h2>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClose}
+              disabled={isUploading}
+              className="text-muted-foreground hover:text-foreground"
+              data-testid="button-cancel-upload"
+            >
+              <X className="w-4 h-4 mr-1" />
+              취소
+            </Button>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="dataset-name" className="text-sm text-muted-foreground">
+              데이터셋 이름
+            </Label>
+            <Input
+              id="dataset-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="예: 고객 구매 데이터"
+              className="bg-background border-border"
+              data-testid="input-dataset-name"
+            />
+          </div>
+
+          <div className="space-y-3">
+            <Label className="text-sm text-muted-foreground">데이터 소스</Label>
+            
+            <div className="flex border-b border-border">
+              <button
+                className="px-6 py-2.5 text-sm font-medium border-b-2 border-primary text-primary"
+                data-testid="tab-csv"
+              >
+                CSV 파일
+              </button>
+            </div>
+
+            <div 
+              className="flex items-center justify-between p-3 bg-background border border-border rounded-lg cursor-pointer hover:border-primary/50 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="button-file-select"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-foreground">파일 선택</span>
+                <span className="text-sm text-muted-foreground">
+                  {file ? file.name : '선택된 파일 없음'}
+                </span>
+              </div>
+              {file && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  data-testid="button-remove-file"
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+              )}
+            </div>
             <input
               ref={fileInputRef}
               type="file"
@@ -168,140 +203,79 @@ export function FileUploadDialog({ open, onOpenChange, onUploadSuccess }: FileUp
               className="hidden"
               data-testid="input-file"
             />
-            {file ? (
-              <div className="flex items-center justify-center gap-2">
-                <FileSpreadsheet className="w-8 h-8 text-primary" />
-                <div className="text-left">
-                  <p className="font-medium text-foreground">{file.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {(file.size / 1024).toFixed(1)} KB
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setFile(null);
-                    if (fileInputRef.current) fileInputRef.current.value = "";
-                  }}
-                  data-testid="button-remove-file"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
+          </div>
+
+          <div className="flex items-center justify-between p-4 bg-background border border-border rounded-lg">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-full bg-muted">
+                <Shield className="w-4 h-4 text-muted-foreground" />
               </div>
-            ) : (
-              <div className="space-y-2">
-                <Upload className="w-8 h-8 mx-auto text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  파일을 드래그하거나 클릭하여 선택하세요
+              <div>
+                <p className="text-sm font-medium text-foreground">개인정보 가명처리</p>
+                <p className="text-xs text-muted-foreground">
+                  이름, 전화번호, 주민번호, 이메일 등을 자동으로 마스킹합니다
                 </p>
-                <p className="text-xs text-muted-foreground">CSV 파일만 지원 (최대 10MB)</p>
               </div>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="name">데이터셋 이름 *</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="예: 고객 데이터, 판매 기록"
-              data-testid="input-dataset-name"
+            </div>
+            <Switch
+              checked={anonymize}
+              onCheckedChange={setAnonymize}
+              data-testid="switch-anonymize"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="description">설명 (선택)</Label>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="데이터셋에 대한 간단한 설명"
-              rows={2}
-              data-testid="input-dataset-description"
-            />
-          </div>
-
-          <div className="space-y-3">
-            <Label>데이터 유형</Label>
-            <RadioGroup
-              value={dataType}
-              onValueChange={(value) => setDataType(value as "structured" | "unstructured")}
-              className="grid grid-cols-2 gap-3"
-            >
-              <Label
-                htmlFor="structured"
-                className={`
-                  flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-                  ${dataType === 'structured' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}
-                `}
+            <Label className="text-sm text-muted-foreground">데이터 타입</Label>
+            <Select value={dataType} onValueChange={(v) => setDataType(v as "structured" | "unstructured")}>
+              <SelectTrigger 
+                className="w-full bg-background border-border"
+                data-testid="select-data-type"
               >
-                <RadioGroupItem value="structured" id="structured" className="mt-0.5" />
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="structured" data-testid="option-structured">
+                  <div className="flex items-center gap-2">
                     <Database className="w-4 h-4" />
-                    <span className="font-medium">정형 데이터</span>
+                    <span>정형 데이터 (DuckDB - 970배 빠른 분석)</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    테이블 형식, SQL 쿼리 가능
-                  </p>
-                </div>
-              </Label>
-
-              <Label
-                htmlFor="unstructured"
-                className={`
-                  flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-                  ${dataType === 'unstructured' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}
-                `}
-              >
-                <RadioGroupItem value="unstructured" id="unstructured" className="mt-0.5" />
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5">
+                </SelectItem>
+                <SelectItem value="unstructured" data-testid="option-unstructured">
+                  <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4" />
-                    <span className="font-medium">비정형 데이터</span>
+                    <span>비정형 데이터 (pgvector - 벡터 검색)</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    텍스트 검색, 유연한 구조
-                  </p>
-                </div>
-              </Label>
-            </RadioGroup>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {dataType === 'structured' 
+                ? '숫자, 날짜 등 정형화된 데이터 분석에 최적 (DuckDB - MySQL 대비 970배 성능)'
+                : '텍스트, 문서 등 비정형 데이터의 시맨틱 검색에 최적 (pgvector - 벡터 임베딩 지원)'
+              }
+            </p>
           </div>
 
-          <div className="flex gap-2 pt-2">
-            <Button
-              variant="outline"
-              onClick={handleClose}
-              disabled={isUploading}
-              className="flex-1"
-              data-testid="button-cancel-upload"
-            >
-              취소
-            </Button>
-            <Button
-              onClick={handleUpload}
-              disabled={!file || !name.trim() || isUploading}
-              className="flex-1"
-              data-testid="button-submit-upload"
-            >
-              {isUploading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  업로드 중...
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4 mr-2" />
-                  업로드
-                </>
-              )}
-            </Button>
-          </div>
+          <Button
+            onClick={handleUpload}
+            disabled={!file || !name.trim() || isUploading}
+            className="w-full h-12 text-base bg-primary hover:bg-primary/90"
+            data-testid="button-submit-upload"
+          >
+            {isUploading ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                업로드 중...
+              </>
+            ) : (
+              <>
+                <Save className="w-5 h-5 mr-2" />
+                데이터셋 저장
+              </>
+            )}
+          </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }

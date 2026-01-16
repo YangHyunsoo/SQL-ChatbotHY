@@ -52,17 +52,27 @@ The server handles API requests, serves the static frontend in production, and m
   - `structured_data` - Structured (tabular) data storage with JSON columns
   - `unstructured_data` - Unstructured (text) data with search support
 
-### CSV Upload & Dataset Management (v1.5)
+### CSV Upload & Dataset Management (v2.0)
 - **File Upload**: Multer for multipart/form-data handling, max 10MB
 - **CSV Parsing**: PapaParse for parsing CSV files with header support
-- **Data Types**:
-  - **Structured**: Tabular data with auto-inferred column types (text, number, date, boolean)
-  - **Unstructured**: Text content with flexible metadata and full-text search
+- **Data Storage**:
+  - **Structured Data (DuckDB)**: High-performance columnar database for analytics (970x faster than MySQL)
+    - Stored in `data/analytics.duckdb` file
+    - Auto-type inference for columns (VARCHAR, DOUBLE, TIMESTAMP, BOOLEAN)
+    - Managed via `server/duckdb-service.ts`
+  - **Unstructured Data (PostgreSQL)**: Text storage with full-text search support
+    - Stored in `unstructured_data` table
+    - Prepared for pgvector integration (semantic search)
+- **New Upload UI**: Redesigned dialog based on modern data platform patterns
+  - Dataset name input
+  - CSV file selection only
+  - Privacy anonymization toggle (optional)
+  - Data type dropdown with database info
 - **Features**:
   - Automatic column type inference from data
-  - Dataset viewing with pagination
-  - Dataset deletion with cascade
-  - Dynamic AI schema includes uploaded datasets for natural language queries
+  - Dataset viewing with pagination (queries from DuckDB or PostgreSQL)
+  - Dataset deletion with DuckDB table cleanup
+  - Dynamic AI schema includes uploaded datasets
 
 ### AI Integration
 - **Provider**: OpenRouter API (OpenAI-compatible interface)

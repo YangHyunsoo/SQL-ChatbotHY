@@ -69,6 +69,7 @@ export const datasets = pgTable("datasets", {
   rowCount: integer("row_count").notNull().default(0),
   columnInfo: text("column_info"), // JSON string of column metadata for structured data
   description: text("description"),
+  duckdbTable: text("duckdb_table"), // DuckDB table name for structured data
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
