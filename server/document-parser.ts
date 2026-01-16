@@ -8,16 +8,9 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-// Dynamic import for pdf-parse (CommonJS module)
-let pdfParse: ((buffer: Buffer) => Promise<any>) | null = null;
-async function getPdfParse(): Promise<(buffer: Buffer) => Promise<any>> {
-  if (!pdfParse) {
-    // @ts-ignore - pdf-parse has complex exports
-    const module = await import('pdf-parse');
-    pdfParse = (module as any).default || module;
-  }
-  return pdfParse!;
-}
+// Import pdf-parse (CommonJS module)
+import * as pdfParseModule from 'pdf-parse';
+const pdfParseLib = (pdfParseModule as any).default || pdfParseModule;
 
 export interface ParsedDocument {
   text: string;
@@ -66,8 +59,7 @@ async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
   let pageCount = 1;
   
   try {
-    const parser = await getPdfParse();
-    const data = await parser(buffer);
+    const data = await pdfParseLib(buffer);
     const text = data.text || '';
     pageCount = data.numpages || 1;
     
