@@ -9,6 +9,8 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
 });
 
+const MODEL = "mistralai/devstral-2512:free";
+
 export interface SearchResult {
   chunkId: number;
   documentId: number;
@@ -37,6 +39,7 @@ export async function hybridSearch(
 ): Promise<RagContext> {
   try {
     const queryTokens = tokenize(query);
+    console.log('RAG Search - Query tokens:', queryTokens);
     
     const allChunks = await db
       .select({
@@ -50,7 +53,10 @@ export async function hybridSearch(
       .innerJoin(knowledgeDocuments, eq(documentChunks.documentId, knowledgeDocuments.id))
       .where(eq(knowledgeDocuments.status, 'ready'));
     
+    console.log('RAG Search - Found chunks:', allChunks.length);
+    
     if (allChunks.length === 0) {
+      console.log('RAG Search - No chunks found in ready documents');
       return { results: [], totalFound: 0 };
     }
     
@@ -80,10 +86,15 @@ export async function hybridSearch(
       };
     });
     
+    console.log('RAG Search - Top scores:', scoredChunks.slice(0, 3).map(c => ({ id: c.chunkId, score: c.score })));
+    
     const results = scoredChunks
       .sort((a, b) => b.score - a.score)
-      .slice(0, topK)
-      .filter(r => r.score > 0.05);
+      .slice(0, topK);
+    
+    if (results.length > 0 && results[0].score === 0) {
+      console.log('RAG Search - No keyword matches, returning top chunks anyway');
+    }
     
     return {
       results,
@@ -155,7 +166,7 @@ ${contextText}
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'google/gemini-2.0-flash-exp:free',
+      model: MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -167,21 +178,7 @@ ${contextText}
     return response.choices[0]?.message?.content || '응답을 생성할 수 없습니다.';
   } catch (error) {
     console.error('RAG response generation error:', error);
-    try {
-      const fallbackResponse = await openai.chat.completions.create({
-        model: 'mistralai/mistral-7b-instruct:free',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 2000,
-      });
-      return fallbackResponse.choices[0]?.message?.content || '응답을 생성할 수 없습니다.';
-    } catch (fallbackError) {
-      console.error('Fallback model error:', fallbackError);
-      return '응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
-    }
+    return '응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
   }
 }
 

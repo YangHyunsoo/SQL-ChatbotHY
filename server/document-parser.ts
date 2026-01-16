@@ -8,9 +8,8 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-// Import pdf-parse (CommonJS module)
-import * as pdfParseModule from 'pdf-parse';
-const pdfParseLib = (pdfParseModule as any).default || pdfParseModule;
+// pdf-parse is loaded dynamically due to CommonJS compatibility issues
+let pdfParseLib: ((buffer: Buffer) => Promise<any>) | null = null;
 
 export interface ParsedDocument {
   text: string;
@@ -59,6 +58,11 @@ async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
   let pageCount = 1;
   
   try {
+    // Dynamic import for pdf-parse
+    if (!pdfParseLib) {
+      const module = await import('pdf-parse');
+      pdfParseLib = module.default || module;
+    }
     const data = await pdfParseLib(buffer);
     const text = data.text || '';
     pageCount = data.numpages || 1;
