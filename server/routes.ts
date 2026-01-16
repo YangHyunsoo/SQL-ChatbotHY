@@ -13,6 +13,7 @@ import * as duckdbService from "./duckdb-service";
 import * as documentParser from "./document-parser";
 import * as embeddingService from "./embedding-service";
 import * as ragService from "./rag-service";
+import * as ollamaService from "./ollama-service";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
@@ -1074,6 +1075,69 @@ ${FEW_SHOT_EXAMPLES}
       console.error("Remove RAG model error:", err);
       res.status(500).json({ message: "모델 삭제에 실패했습니다" });
     }
+  });
+
+  // Ollama API Endpoints
+  
+  // Get Ollama configuration
+  app.get("/api/ollama/config", async (req, res) => {
+    try {
+      const config = ollamaService.getOllamaConfig();
+      const ollamaModel = ragService.getOllamaModel();
+      res.json({ ...config, model: ollamaModel });
+    } catch (err) {
+      console.error("Get Ollama config error:", err);
+      res.status(500).json({ message: "Ollama 설정을 가져오는데 실패했습니다" });
+    }
+  });
+
+  // Update Ollama configuration
+  app.put("/api/ollama/config", async (req, res) => {
+    try {
+      const { baseUrl, enabled, model } = req.body;
+      
+      if (baseUrl !== undefined && enabled !== undefined) {
+        ollamaService.setOllamaConfig(baseUrl, enabled);
+      }
+      
+      if (model) {
+        ragService.setOllamaModel(model);
+      }
+      
+      const config = ollamaService.getOllamaConfig();
+      const ollamaModel = ragService.getOllamaModel();
+      res.json({ ...config, model: ollamaModel });
+    } catch (err) {
+      console.error("Update Ollama config error:", err);
+      res.status(500).json({ message: "Ollama 설정 업데이트에 실패했습니다" });
+    }
+  });
+
+  // Check Ollama connection
+  app.get("/api/ollama/status", async (req, res) => {
+    try {
+      const status = await ollamaService.checkOllamaConnection();
+      res.json(status);
+    } catch (err) {
+      console.error("Ollama status check error:", err);
+      res.status(500).json({ connected: false, error: "연결 확인 실패" });
+    }
+  });
+
+  // List Ollama models
+  app.get("/api/ollama/models", async (req, res) => {
+    try {
+      const result = await ollamaService.listOllamaModels();
+      res.json(result);
+    } catch (err) {
+      console.error("List Ollama models error:", err);
+      res.status(500).json({ models: [], error: "모델 목록 조회 실패" });
+    }
+  });
+
+  // Get recommended Ollama models for low-spec systems
+  app.get("/api/ollama/recommended-models", async (req, res) => {
+    res.json({ models: ollamaService.RECOMMENDED_OLLAMA_MODELS });
   });
 
   return httpServer;

@@ -2,6 +2,7 @@ import { db } from './db';
 import { knowledgeDocuments, documentChunks, KnowledgeDocument, DocumentChunk } from '@shared/schema';
 import { eq, ilike, sql, desc } from 'drizzle-orm';
 import { generateEmbedding, keywordSimilarity } from './embedding-service';
+import * as ollamaService from './ollama-service';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
@@ -9,7 +10,18 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
 });
 
-// 기본 RAG 모델 목록 (로컬 기반, 온라인 모델 제외)
+// Ollama 모델 설정
+let ollamaModel = 'llama3.2:3b';
+
+export function setOllamaModel(model: string) {
+  ollamaModel = model;
+}
+
+export function getOllamaModel(): string {
+  return ollamaModel;
+}
+
+// 기본 RAG 모델 목록 (OpenRouter 클라우드 모델 - Ollama 비활성화 시 사용)
 const DEFAULT_RAG_MODELS = [
   { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Meta Llama 3.3 70B", enabled: true },
   { id: "mistralai/devstral-2512:free", name: "Mistral Devstral", enabled: true },
@@ -199,16 +211,36 @@ ${contextText}
 
 위 문서 내용을 바탕으로 답변해주세요.`;
 
-  // 활성화된 모델만 사용 (다중 폴백)
+  // Ollama 사용 시 로컬 모델로 응답 생성
+  if (ollamaService.isOllamaEnabled()) {
+    console.log(`RAG using Ollama model: ${ollamaModel}`);
+    const result = await ollamaService.generateWithOllama(
+      ollamaModel,
+      userPrompt,
+      systemPrompt,
+      { temperature: 0.2, maxTokens: 2000 }
+    );
+    
+    if (result.response) {
+      return result.response;
+    }
+    
+    if (result.error) {
+      console.error('Ollama error:', result.error);
+      return `Ollama 오류: ${result.error}. Ollama 서버가 실행 중인지 확인해주세요.`;
+    }
+  }
+  
+  // OpenRouter 클라우드 모델 사용 (Ollama 비활성화 시)
   const enabledModels = ragModels.filter(m => m.enabled);
   
   if (enabledModels.length === 0) {
-    return '활성화된 RAG 모델이 없습니다. 설정에서 모델을 활성화해주세요.';
+    return '활성화된 RAG 모델이 없습니다. 설정에서 Ollama를 활성화하거나 클라우드 모델을 활성화해주세요.';
   }
   
   for (const model of enabledModels) {
     try {
-      console.log(`RAG using model: ${model.id} (${model.name})`);
+      console.log(`RAG using OpenRouter model: ${model.id} (${model.name})`);
       const response = await openai.chat.completions.create({
         model: model.id,
         messages: [
