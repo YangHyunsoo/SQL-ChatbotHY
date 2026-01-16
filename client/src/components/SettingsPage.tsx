@@ -27,56 +27,88 @@ interface SettingsPageProps {
   onSettingsChange: (settings: Settings) => void;
 }
 
+const RAG_MODELS_STORAGE_KEY = 'sql-copilot-rag-models';
+
 export function SettingsPage({ settings, onSettingsChange }: SettingsPageProps) {
   const [newModelId, setNewModelId] = useState("");
   const [newModelName, setNewModelName] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [localModels, setLocalModels] = useState<RagModel[]>([]);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Fetch RAG models from server
   const { data: modelsData, isLoading: modelsLoading } = useQuery<{ models: RagModel[] }>({
     queryKey: ['/api/rag/models'],
   });
 
-  // Toggle model mutation
-  const toggleModelMutation = useMutation({
-    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
-      return apiRequest('PATCH', `/api/rag/models/${encodeURIComponent(id)}/toggle`, { enabled });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/rag/models'] });
+  // Sync models mutation (batch update)
+  const syncModelsMutation = useMutation({
+    mutationFn: async (models: RagModel[]) => {
+      return apiRequest('PUT', '/api/rag/models', { models });
     },
   });
 
-  // Add model mutation
-  const addModelMutation = useMutation({
-    mutationFn: async ({ id, name }: { id: string; name: string }) => {
-      return apiRequest('POST', '/api/rag/models', { id, name });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/rag/models'] });
+  // Load from localStorage on mount and sync with server
+  useEffect(() => {
+    const savedModels = localStorage.getItem(RAG_MODELS_STORAGE_KEY);
+    if (savedModels) {
+      try {
+        const parsed = JSON.parse(savedModels);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setLocalModels(parsed);
+          // Sync saved models to server
+          syncModelsMutation.mutate(parsed);
+          setIsInitialized(true);
+          return;
+        }
+      } catch (e) {
+        console.error('Failed to parse saved models:', e);
+      }
+    }
+    // If no localStorage, use server data
+    if (modelsData?.models) {
+      setLocalModels(modelsData.models);
+      setIsInitialized(true);
+    }
+  }, [modelsData?.models]);
+
+  // Save to localStorage whenever localModels changes
+  useEffect(() => {
+    if (isInitialized && localModels.length > 0) {
+      localStorage.setItem(RAG_MODELS_STORAGE_KEY, JSON.stringify(localModels));
+    }
+  }, [localModels, isInitialized]);
+
+  // Toggle model
+  const handleToggleModel = (id: string, enabled: boolean) => {
+    const updated = localModels.map(m => m.id === id ? { ...m, enabled } : m);
+    setLocalModels(updated);
+    syncModelsMutation.mutate(updated);
+  };
+
+  // Add model
+  const handleAddModel = () => {
+    if (newModelId && newModelName) {
+      if (localModels.find(m => m.id === newModelId)) {
+        return; // Already exists
+      }
+      const updated = [...localModels, { id: newModelId, name: newModelName, enabled: true }];
+      setLocalModels(updated);
+      syncModelsMutation.mutate(updated);
       setNewModelId("");
       setNewModelName("");
       setShowAddForm(false);
-    },
-  });
-
-  // Remove model mutation
-  const removeModelMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest('DELETE', `/api/rag/models/${encodeURIComponent(id)}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/rag/models'] });
-    },
-  });
-
-  const ragModels = modelsData?.models || [];
-
-  const handleAddModel = () => {
-    if (newModelId && newModelName) {
-      addModelMutation.mutate({ id: newModelId, name: newModelName });
     }
   };
+
+  // Remove model
+  const handleRemoveModel = (id: string) => {
+    const updated = localModels.filter(m => m.id !== id);
+    setLocalModels(updated);
+    syncModelsMutation.mutate(updated);
+  };
+
+  const ragModels = localModels.length > 0 ? localModels : (modelsData?.models || []);
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
@@ -201,7 +233,7 @@ export function SettingsPage({ settings, onSettingsChange }: SettingsPageProps) 
                   <Button 
                     size="sm" 
                     onClick={handleAddModel}
-                    disabled={!newModelId || !newModelName || addModelMutation.isPending}
+                    disabled={!newModelId || !newModelName || syncModelsMutation.isPending}
                     data-testid="button-add-model-confirm"
                   >
                     추가
@@ -245,16 +277,14 @@ export function SettingsPage({ settings, onSettingsChange }: SettingsPageProps) 
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={model.enabled}
-                        onCheckedChange={(checked) => 
-                          toggleModelMutation.mutate({ id: model.id, enabled: checked })
-                        }
+                        onCheckedChange={(checked) => handleToggleModel(model.id, checked)}
                         data-testid={`switch-model-${index}`}
                       />
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() => removeModelMutation.mutate(model.id)}
-                        disabled={removeModelMutation.isPending}
+                        onClick={() => handleRemoveModel(model.id)}
+                        disabled={syncModelsMutation.isPending}
                         data-testid={`button-remove-model-${index}`}
                       >
                         <Trash2 className="w-4 h-4 text-destructive" />
