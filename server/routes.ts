@@ -602,10 +602,19 @@ ${FEW_SHOT_EXAMPLES}
         ? analyzeColumns(headers, rows)
         : null;
 
+      // Decode file name properly for Korean/UTF-8 characters
+      let fileName = req.file.originalname;
+      try {
+        // Multer may encode non-ASCII names incorrectly, try to decode
+        fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+      } catch {
+        // Keep original if decoding fails
+      }
+
       // Create dataset record (without DuckDB table name first)
       const [newDataset] = await db.insert(datasets).values({
         name,
-        fileName: req.file.originalname,
+        fileName,
         dataType,
         rowCount: rows.length,
         columnInfo: columnInfo ? JSON.stringify(columnInfo) : null,

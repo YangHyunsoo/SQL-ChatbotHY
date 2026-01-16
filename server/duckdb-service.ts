@@ -53,13 +53,13 @@ function sanitizeTableName(name: string, id: number): string {
   return `dataset_${id}_${sanitized || 'data'}`;
 }
 
-function sanitizeColumnName(name: string): string {
+function sanitizeColumnName(name: string, index: number = 0): string {
+  // Keep Korean characters (Hangul) and basic ASCII
   const sanitized = name
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/[^\uAC00-\uD7A3\u3131-\u3163a-zA-Z0-9_]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
-  return sanitized || 'col';
+  return sanitized || `col_${index}`;
 }
 
 export async function createDatasetTable(
@@ -71,8 +71,8 @@ export async function createDatasetTable(
     const conn = getConnection();
     const tableName = sanitizeTableName(datasetName, datasetId);
     
-    const columnDefs = columns.map(col => {
-      const colName = sanitizeColumnName(col.name);
+    const columnDefs = columns.map((col, idx) => {
+      const colName = sanitizeColumnName(col.name, idx);
       const colType = mapTypeToDuckDB(col.type);
       return `"${colName}" ${colType}`;
     }).join(', ');
@@ -99,7 +99,7 @@ export async function insertDataRows(
   return new Promise((resolve, reject) => {
     const conn = getConnection();
     
-    const columnNames = columns.map(c => `"${sanitizeColumnName(c.name)}"`).join(', ');
+    const columnNames = columns.map((c, idx) => `"${sanitizeColumnName(c.name, idx)}"`).join(', ');
     
     const batchSize = 100;
     let processed = 0;
