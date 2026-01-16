@@ -30,6 +30,11 @@ Features:
 - Conversation persistence via localStorage (max 20 conversations, 80 messages each)
 - Dark/light mode with localStorage persistence
 - Sample query buttons for quick testing
+- **Data Visualization**: Interactive charts for query results
+  - Bar, Line, and Pie chart types via Recharts
+  - Auto-detection of chartable data (requires numeric columns)
+  - Toggle button to show/hide charts
+  - Responsive design with Korean number formatting (K, M, B)
 
 ### Backend Architecture
 - **Framework**: Express.js with TypeScript

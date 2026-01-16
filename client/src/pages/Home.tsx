@@ -6,6 +6,7 @@ import { TopNav, type TabType } from "@/components/TopNav";
 import { ChatInput } from "@/components/ChatInput";
 import { SqlBlock } from "@/components/SqlBlock";
 import { DataTable } from "@/components/DataTable";
+import { DataChart, ChartToggle, canShowChart } from "@/components/DataChart";
 import { SettingsPage } from "@/components/SettingsPage";
 import { DatabasePage } from "@/components/DatabasePage";
 import { FileUploadDialog } from "@/components/FileUploadDialog";
@@ -66,6 +67,7 @@ export default function Home() {
   });
   const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
+  const [showChartForMessage, setShowChartForMessage] = useState<Record<string, boolean>>({});
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
@@ -397,13 +399,26 @@ export default function Home() {
                         </motion.div>
                       )}
                       
-                      {msg.data && (
+                      {msg.data && msg.data.length > 0 && (
                         <motion.div
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: 0.2 }}
-                          className="w-full"
+                          className="w-full space-y-3"
                         >
+                          <div className="flex items-center gap-2">
+                            <ChartToggle
+                              showChart={showChartForMessage[msg.id] ?? canShowChart(msg.data || [])}
+                              onToggle={() => setShowChartForMessage(prev => ({
+                                ...prev,
+                                [msg.id]: !(prev[msg.id] ?? canShowChart(msg.data || []))
+                              }))}
+                              canChart={canShowChart(msg.data || [])}
+                            />
+                          </div>
+                          {(showChartForMessage[msg.id] ?? canShowChart(msg.data || [])) && canShowChart(msg.data || []) && (
+                            <DataChart data={msg.data || []} />
+                          )}
                           <DataTable data={msg.data} />
                         </motion.div>
                       )}
