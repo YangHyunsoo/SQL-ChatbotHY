@@ -112,11 +112,17 @@ The server handles API requests, serves the static frontend in production, and m
   - Keyword-based similarity search across document chunks
   - Retrieves top 5 most relevant chunks per query
   - Source attribution with document name, page number, and relevance score
-  - **Multi-model fallback for stability**:
-    1. Google Gemini 2.0 Flash (primary, multilingual)
-    2. Meta Llama 3.3 70B (fallback, multilingual)
-    3. Mistral Devstral (backup)
+  - **Multi-model fallback for stability** (로컬 기반, 온라인 모델 제외):
+    1. Meta Llama 3.3 70B (primary, multilingual)
+    2. Mistral Devstral (backup)
   - Intent detection for summary/excerpt/content queries
+- **Model Management** (설정 페이지):
+  - 모델 목록 표시 (활성/비활성 상태)
+  - 모델 활성화/비활성화 토글
+  - 새 모델 추가 기능 (OpenRouter 형식)
+  - 모델 삭제 기능
+  - localStorage 영구 저장 (페이지 새로고침 후에도 유지)
+  - 서버와 자동 동기화
 - **Database Tables**:
   - `knowledge_documents` - Document metadata (name, type, status, chunk count)
   - `document_chunks` - Vectorized text chunks with pgvector embeddings
