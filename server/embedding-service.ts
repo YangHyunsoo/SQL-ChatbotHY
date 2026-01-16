@@ -1,72 +1,72 @@
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-});
-
 export interface EmbeddingResult {
   embedding: number[];
   tokenCount: number;
+  keywords: string[];
+}
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s가-힣]/g, ' ')
+    .split(/\s+/)
+    .filter(token => token.length >= 2);
+}
+
+function extractKeywords(text: string): string[] {
+  const tokens = tokenize(text);
+  const frequency: Record<string, number> = {};
+  
+  for (const token of tokens) {
+    frequency[token] = (frequency[token] || 0) + 1;
+  }
+  
+  return Object.entries(frequency)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 50)
+    .map(([word]) => word);
 }
 
 export async function generateEmbedding(text: string): Promise<EmbeddingResult> {
-  try {
-    const cleanedText = text.slice(0, 8000);
-    
-    const response = await openai.embeddings.create({
-      model: 'openai/text-embedding-3-small',
-      input: cleanedText,
-    });
-    
-    return {
-      embedding: response.data[0].embedding,
-      tokenCount: response.usage?.total_tokens || 0,
-    };
-  } catch (error) {
-    console.error('Embedding generation error:', error);
-    throw new Error('임베딩 생성에 실패했습니다.');
-  }
+  const keywords = extractKeywords(text);
+  
+  return {
+    embedding: [],
+    tokenCount: keywords.length,
+    keywords,
+  };
 }
 
 export async function generateEmbeddings(texts: string[]): Promise<EmbeddingResult[]> {
-  const results: EmbeddingResult[] = [];
+  return texts.map(text => ({
+    embedding: [],
+    tokenCount: 0,
+    keywords: extractKeywords(text),
+  }));
+}
+
+export function keywordSimilarity(queryKeywords: string[], contentKeywords: string[]): number {
+  if (queryKeywords.length === 0 || contentKeywords.length === 0) return 0;
   
-  const batchSize = 20;
-  for (let i = 0; i < texts.length; i += batchSize) {
-    const batch = texts.slice(i, i + batchSize);
-    const cleanedBatch = batch.map(t => t.slice(0, 8000));
-    
-    try {
-      const response = await openai.embeddings.create({
-        model: 'openai/text-embedding-3-small',
-        input: cleanedBatch,
-      });
-      
-      for (const item of response.data) {
-        results.push({
-          embedding: item.embedding,
-          tokenCount: 0,
-        });
-      }
-    } catch (error) {
-      console.error('Batch embedding error:', error);
-      for (const text of batch) {
-        try {
-          const single = await generateEmbedding(text);
-          results.push(single);
-        } catch {
-          results.push({ embedding: [], tokenCount: 0 });
-        }
-      }
+  const querySet = new Set(queryKeywords);
+  const contentSet = new Set(contentKeywords);
+  
+  let matchCount = 0;
+  const queryArray = Array.from(querySet);
+  const contentArray = Array.from(contentSet);
+  
+  for (const keyword of queryArray) {
+    if (contentSet.has(keyword)) {
+      matchCount++;
     }
-    
-    if (i + batchSize < texts.length) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+    for (const contentKeyword of contentArray) {
+      if (contentKeyword.includes(keyword) || keyword.includes(contentKeyword)) {
+        matchCount += 0.5;
+      }
     }
   }
   
-  return results;
+  const score = matchCount / Math.max(querySet.size, 1);
+  return Math.min(score, 1.0);
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {

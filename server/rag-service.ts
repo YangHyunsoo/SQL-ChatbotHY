@@ -1,7 +1,7 @@
 import { db } from './db';
 import { knowledgeDocuments, documentChunks, KnowledgeDocument, DocumentChunk } from '@shared/schema';
 import { eq, ilike, sql, desc } from 'drizzle-orm';
-import { generateEmbedding, cosineSimilarity } from './embedding-service';
+import { generateEmbedding, keywordSimilarity } from './embedding-service';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
@@ -23,12 +23,20 @@ export interface RagContext {
   totalFound: number;
 }
 
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s가-힣]/g, ' ')
+    .split(/\s+/)
+    .filter(token => token.length >= 2);
+}
+
 export async function hybridSearch(
   query: string,
   topK: number = 5
 ): Promise<RagContext> {
   try {
-    const queryEmbedding = await generateEmbedding(query);
+    const queryTokens = tokenize(query);
     
     const allChunks = await db
       .select({
@@ -36,35 +44,31 @@ export async function hybridSearch(
         documentId: documentChunks.documentId,
         content: documentChunks.content,
         pageNumber: documentChunks.pageNumber,
-        embedding: documentChunks.embedding,
         documentName: knowledgeDocuments.name,
       })
       .from(documentChunks)
       .innerJoin(knowledgeDocuments, eq(documentChunks.documentId, knowledgeDocuments.id))
       .where(eq(knowledgeDocuments.status, 'ready'));
     
+    if (allChunks.length === 0) {
+      return { results: [], totalFound: 0 };
+    }
+    
     const scoredChunks = allChunks.map(chunk => {
-      let vectorScore = 0;
-      if (chunk.embedding) {
-        try {
-          const embedding = JSON.parse(chunk.embedding);
-          vectorScore = cosineSimilarity(queryEmbedding.embedding, embedding);
-        } catch {
-          vectorScore = 0;
+      const contentTokens = tokenize(chunk.content);
+      
+      let matchScore = 0;
+      for (const queryToken of queryTokens) {
+        for (const contentToken of contentTokens) {
+          if (contentToken === queryToken) {
+            matchScore += 1.0;
+          } else if (contentToken.includes(queryToken) || queryToken.includes(contentToken)) {
+            matchScore += 0.5;
+          }
         }
       }
       
-      const queryTerms = query.toLowerCase().split(/\s+/);
-      const contentLower = chunk.content.toLowerCase();
-      let keywordScore = 0;
-      for (const term of queryTerms) {
-        if (term.length >= 2 && contentLower.includes(term)) {
-          keywordScore += 0.1;
-        }
-      }
-      keywordScore = Math.min(keywordScore, 0.3);
-      
-      const combinedScore = vectorScore * 0.7 + keywordScore * 0.3;
+      const normalizedScore = Math.min(matchScore / Math.max(queryTokens.length, 1), 1.0);
       
       return {
         chunkId: chunk.id,
@@ -72,14 +76,14 @@ export async function hybridSearch(
         documentName: chunk.documentName,
         content: chunk.content,
         pageNumber: chunk.pageNumber || undefined,
-        score: combinedScore,
+        score: normalizedScore,
       };
     });
     
     const results = scoredChunks
       .sort((a, b) => b.score - a.score)
       .slice(0, topK)
-      .filter(r => r.score > 0.1);
+      .filter(r => r.score > 0.05);
     
     return {
       results,
@@ -106,7 +110,6 @@ export async function generateRagResponse(
     })
     .join('\n\n---\n\n');
   
-  // Detect query intent
   const isSummaryRequest = /요약|정리|간략|핵심|개요/.test(query);
   const isExcerptRequest = /발췌|인용|원문|그대로/.test(query);
   const isContentRequest = /내용|뭐야|무엇|무슨|어떤/.test(query);
@@ -151,7 +154,6 @@ ${contextText}
 위 문서 내용을 바탕으로 답변해주세요.`;
 
   try {
-    // Use a model optimized for Korean language understanding
     const response = await openai.chat.completions.create({
       model: 'google/gemini-2.0-flash-exp:free',
       messages: [
@@ -165,7 +167,6 @@ ${contextText}
     return response.choices[0]?.message?.content || '응답을 생성할 수 없습니다.';
   } catch (error) {
     console.error('RAG response generation error:', error);
-    // Fallback to alternative model
     try {
       const fallbackResponse = await openai.chat.completions.create({
         model: 'mistralai/mistral-7b-instruct:free',

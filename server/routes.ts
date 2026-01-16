@@ -1034,18 +1034,14 @@ async function processDocument(docId: number, buffer: Buffer, fileName: string):
       return;
     }
 
-    // Generate embeddings for chunks
-    const embeddings = await embeddingService.generateEmbeddings(chunks);
-
-    // Insert chunks with embeddings
+    // Insert chunks (keyword-based search, no embedding needed)
     for (let i = 0; i < chunks.length; i++) {
-      const embedding = embeddings[i];
       await db.insert(documentChunks).values({
         documentId: docId,
         chunkIndex: i,
         content: chunks[i],
         pageNumber: Math.floor((i / chunks.length) * parsed.pageCount) + 1,
-        embedding: embedding.embedding.length > 0 ? JSON.stringify(embedding.embedding) : null,
+        embedding: null,
       });
     }
 
