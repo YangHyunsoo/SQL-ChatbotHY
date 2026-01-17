@@ -1,0 +1,55 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "detail": "Development server with hot reload"
+    },
+    {
+      "label": "build",
+      "type": "npm",
+      "script": "build",
+      "problemMatcher": [],
+      "group": "build",
+      "detail": "Build for production"
+    },
+    {
+      "label": "db:push",
+      "type": "npm",
+      "script": "db:push",
+      "problemMatcher": [],
+      "detail": "Push database schema changes"
+    },
+    {
+      "label": "type-check",
+      "type": "npm",
+      "script": "check",
+      "problemMatcher": ["$tsc"],
+      "group": "test",
+      "detail": "TypeScript type checking"
+    },
+    {
+      "label": "Start Ollama",
+      "type": "shell",
+      "command": "ollama serve",
+      "isBackground": true,
+      "problemMatcher": [],
+      "detail": "Start Ollama local AI server"
+    },
+    {
+      "label": "Pull Ollama Model",
+      "type": "shell",
+      "command": "ollama pull llama3.2:3b",
+      "problemMatcher": [],
+      "detail": "Download recommended AI model for 8GB RAM"
+    }
+  ]
+}
