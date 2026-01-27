@@ -195,6 +195,10 @@ export async function executeAnalyticsQuery(sql: string): Promise<any[]> {
   });
 }
 
+export async function runQuery(sql: string): Promise<any[]> {
+  return executeAnalyticsQuery(sql);
+}
+
 export async function getTableRowCount(tableName: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const conn = getConnection();

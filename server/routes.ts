@@ -79,8 +79,50 @@ function analyzeColumns(headers: string[], rows: any[]): ColumnInfo[] {
   });
 }
 
-async function buildDynamicSchema(): Promise<string> {
+function sanitizeDuckdbColumnName(name: string, index: number = 0): string {
+  const sanitized = name
+    .replace(/[^\uAC00-\uD7A3\u3131-\u3163a-zA-Z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+  return sanitized || `col_${index}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isDatasetQuestion(message: string, datasetNames: string[]): boolean {
+  if (!datasetNames.length) return false;
+  const lowered = message.toLowerCase();
+  const datasetHints = ['dataset', '데이터셋', 'csv', '업로드', '엑셀', '스프레드시트'];
+  if (datasetHints.some(hint => lowered.includes(hint))) return true;
+  return datasetNames.some(name => {
+    if (!name) return false;
+    const escaped = escapeRegExp(name.toLowerCase());
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(lowered) || lowered.includes(name.toLowerCase());
+  });
+}
+
+function pickDuckdbTableFromSql(sqlText: string, duckdbTables: string[]): string | null {
+  if (!duckdbTables.length) return null;
+  for (const table of duckdbTables) {
+    const escaped = escapeRegExp(table);
+    const plainPattern = new RegExp(`\\b${escaped}\\b`, 'i');
+    const quotedPattern = new RegExp(`"${escaped}"`, 'i');
+    if (plainPattern.test(sqlText) || quotedPattern.test(sqlText)) {
+      return table;
+    }
+  }
+  const fallbackMatch = sqlText.match(/\bdataset_[a-z0-9_]+\b/i);
+  return fallbackMatch ? fallbackMatch[0] : null;
+}
+
+async function buildDynamicSchema(): Promise<{ schema: string; duckdbTables: string[]; datasetNames: string[] }> {
   let schema = ENHANCED_SCHEMA;
+  const duckdbTables: string[] = [];
+  const datasetNames: string[] = [];
+  let hasStructuredData = false;
+  let hasDuckdbData = false;
   
   try {
     const uploadedDatasets = await db.select().from(datasets);
@@ -90,29 +132,43 @@ async function buildDynamicSchema(): Promise<string> {
       
       for (const dataset of uploadedDatasets) {
         if (dataset.dataType === 'structured' && dataset.columnInfo) {
+          if (dataset.name) datasetNames.push(dataset.name);
           const columns: ColumnInfo[] = JSON.parse(dataset.columnInfo);
           
           // DuckDB storage (new method)
           if (dataset.duckdbTable) {
+            hasDuckdbData = true;
+            duckdbTables.push(dataset.duckdbTable);
             schema += `\n[DuckDB 테이블: ${dataset.duckdbTable}] - ${dataset.name}\n`;
             schema += `설명: ${dataset.description || dataset.fileName} (DuckDB 고성능 분석용)\n`;
             schema += '| 컬럼명 | 타입 |\n';
             schema += '|--------|------|\n';
             
-            for (const col of columns) {
+            for (const [idx, col] of columns.entries()) {
               const duckType = col.type === 'number' ? 'DOUBLE' 
                 : col.type === 'date' ? 'TIMESTAMP' 
                 : col.type === 'boolean' ? 'BOOLEAN'
                 : 'VARCHAR';
-              const sanitizedName = col.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+              const sanitizedName = sanitizeDuckdbColumnName(col.name, idx);
               schema += `| ${sanitizedName} | ${duckType} |\n`;
             }
             
-            const firstCol = columns[0]?.name.toLowerCase().replace(/[^a-z0-9_]/g, '_') || 'column';
-            schema += `\n[주의] DuckDB 테이블은 PostgreSQL에서 직접 쿼리할 수 없습니다. 이 데이터셋 관련 질문은 structured_data 테이블을 사용하세요.\n`;
-            schema += `쿼리 예시: SELECT data->>'${columns[0]?.name}' as "${firstCol}" FROM structured_data WHERE dataset_id = ${dataset.id}\n`;
+            const firstColumn = columns[0];
+            const firstColumnName = firstColumn ? sanitizeDuckdbColumnName(firstColumn.name, 0) : 'column';
+            const numericColumnIndex = columns.findIndex(col => col.type === 'number');
+            const numericColumnName = numericColumnIndex >= 0
+              ? sanitizeDuckdbColumnName(columns[numericColumnIndex].name, numericColumnIndex)
+              : null;
+            schema += `\n이 데이터셋 관련 질문은 "${dataset.duckdbTable}" 테이블을 기준으로 DuckDB 쿼리를 작성하세요.\n`;
+            schema += `쿼리 예시:\n`;
+            schema += `- 전체 개수: SELECT COUNT(*) AS total_count FROM "${dataset.duckdbTable}"\n`;
+            schema += `- 샘플 조회: SELECT "${firstColumnName}" FROM "${dataset.duckdbTable}" LIMIT 5\n`;
+            if (numericColumnName) {
+              schema += `- 합계/평균: SELECT SUM("${numericColumnName}") AS sum_value, AVG("${numericColumnName}") AS avg_value FROM "${dataset.duckdbTable}"\n`;
+            }
           } else {
             // Legacy PostgreSQL storage
+            hasStructuredData = true;
             schema += `\n[structured_data 테이블에서 dataset_id = ${dataset.id}] - ${dataset.name}\n`;
             schema += `설명: ${dataset.description || dataset.fileName}\n`;
             schema += '| 컬럼명 | 타입 |\n';
@@ -139,13 +195,18 @@ async function buildDynamicSchema(): Promise<string> {
         }
       }
       
-      schema += `\n[참고] 정형 데이터는 JSON 형식으로 저장됨. data->>'컬럼명'으로 접근\n`;
+      if (hasStructuredData) {
+        schema += `\n[참고] structured_data 정형 데이터는 JSON 형식으로 저장됨. data->>'컬럼명'으로 접근\n`;
+      }
+      if (hasDuckdbData) {
+        schema += `\n[참고] DuckDB 테이블은 PostgreSQL에서 직접 쿼리할 수 없습니다.\n`;
+      }
     }
   } catch (err) {
     console.error("Error building dynamic schema:", err);
   }
   
-  return schema;
+  return { schema, duckdbTables, datasetNames };
 }
 
 const ENHANCED_SCHEMA = `
@@ -227,7 +288,13 @@ Q: "최근 판매 10건"
 A: SELECT p.name, s.quantity, s.total_price, s.sale_date FROM sales s JOIN products p ON s.product_id = p.id ORDER BY s.sale_date DESC LIMIT 10
 `;
 
-async function fixSqlWithLLM(originalSql: string, errorMessage: string, userQuestion: string): Promise<string> {
+async function fixSqlWithLLM(
+  originalSql: string,
+  errorMessage: string,
+  userQuestion: string,
+  schema: string,
+  dialect: 'postgres' | 'duckdb'
+): Promise<string> {
   const fixPrompt = `
 You are a SQL expert. The following SQL query failed with an error. Fix it.
 
@@ -236,12 +303,12 @@ Failed SQL: ${originalSql}
 Error: ${errorMessage}
 
 Database Schema:
-${ENHANCED_SCHEMA}
+${schema}
 
 Rules:
 1. Output ONLY the corrected SQL query
 2. No explanations, no markdown
-3. Ensure the query is valid PostgreSQL
+3. Ensure the query is valid ${dialect === 'duckdb' ? 'DuckDB' : 'PostgreSQL'}
 
 Fixed SQL:`;
 
@@ -249,7 +316,7 @@ Fixed SQL:`;
     const completion = await openai.chat.completions.create({
       model: MODEL,
       messages: [
-        { role: "system", content: "You are a SQL expert. Output only valid PostgreSQL queries." },
+        { role: "system", content: `You are a SQL expert. Output only valid ${dialect === 'duckdb' ? 'DuckDB' : 'PostgreSQL'} queries.` },
         { role: "user", content: fixPrompt },
       ],
       temperature: 0,
@@ -371,9 +438,34 @@ export async function registerRoutes(
       const { message } = api.chat.sql.input.parse(req.body);
 
       // Build dynamic schema including uploaded datasets
-      const dynamicSchema = await buildDynamicSchema();
+      const { schema: dynamicSchema, duckdbTables, datasetNames } = await buildDynamicSchema();
+      const datasetQuestion = isDatasetQuestion(message, datasetNames);
+      if (!datasetQuestion) {
+        const generalPrompt = `
+사용자 질문: "${message}"
 
-      const systemPrompt = `You are a PostgreSQL SQL expert assistant. Convert natural language questions (Korean or English) into valid PostgreSQL queries.
+작업:
+- 질문에 대해 일반적인 설명형 답변을 한국어로 작성
+- 데이터 조회, SQL, 테이블 언급 금지
+- 간결하고 친절하게 답변
+`;
+        const generalCompletion = await openai.chat.completions.create({
+          model: MODEL,
+          messages: [
+            { role: "system", content: "당신은 친절한 일반 지식 어시스턴트입니다. 짧고 명확하게 답변하세요." },
+            { role: "user", content: generalPrompt },
+          ],
+          max_tokens: 512,
+        });
+        const answer = generalCompletion.choices[0]?.message?.content || "도움이 필요하시면 조금 더 자세히 질문해 주세요.";
+        return res.json({
+          answer,
+          sql: '',
+          data: [],
+        });
+      }
+
+      const systemPrompt = `You are a SQL expert assistant. Convert natural language questions (Korean or English) into valid SQL queries.
 
 ${dynamicSchema}
 
@@ -386,6 +478,7 @@ ${FEW_SHOT_EXAMPLES}
 4. "가장", "top", "best" 요청 시 반드시 LIMIT 사용
 5. JOIN 필요 시 올바른 FK 관계 사용: sales.product_id = products.id
 6. 집계 함수 사용 시 적절한 GROUP BY 포함
+7. DuckDB 테이블은 data->>'컬럼명' 같은 JSON 접근을 사용하지 마세요.
 `;
 
       const completion = await openai.chat.completions.create({
@@ -403,7 +496,11 @@ ${FEW_SHOT_EXAMPLES}
 
       if (!generatedSql || !generatedSql.toLowerCase().startsWith('select')) {
         console.log("Invalid SQL, using fallback");
-        generatedSql = getFallbackSql(message);
+        if (duckdbTables.length === 1) {
+          generatedSql = `SELECT * FROM "${duckdbTables[0]}" LIMIT 10`;
+        } else {
+          generatedSql = getFallbackSql(message);
+        }
         console.log("Fallback SQL:", generatedSql);
       }
 
@@ -413,8 +510,13 @@ ${FEW_SHOT_EXAMPLES}
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const result = await db.execute(sql.raw(generatedSql));
-          queryResult = result.rows;
+          const duckdbTable = pickDuckdbTableFromSql(generatedSql, duckdbTables);
+          if (duckdbTable) {
+            queryResult = await duckdbService.runQuery(generatedSql);
+          } else {
+            const result = await db.execute(sql.raw(generatedSql));
+            queryResult = result.rows;
+          }
           lastError = null;
           break;
         } catch (dbError: any) {
@@ -423,13 +525,24 @@ ${FEW_SHOT_EXAMPLES}
 
           if (attempt < MAX_RETRIES) {
             console.log("Attempting to fix SQL with LLM...");
-            const fixedSql = await fixSqlWithLLM(generatedSql, dbError.message, message);
+            const duckdbTable = pickDuckdbTableFromSql(generatedSql, duckdbTables);
+            const fixedSql = await fixSqlWithLLM(
+              generatedSql,
+              dbError.message,
+              message,
+              dynamicSchema,
+              duckdbTable ? 'duckdb' : 'postgres'
+            );
             
             if (fixedSql && fixedSql !== generatedSql) {
               console.log("Fixed SQL:", fixedSql);
               generatedSql = fixedSql;
             } else {
-              generatedSql = getFallbackSql(message);
+              if (duckdbTables.length === 1 && duckdbTable) {
+                generatedSql = `SELECT * FROM "${duckdbTables[0]}" LIMIT 10`;
+              } else {
+                generatedSql = getFallbackSql(message);
+              }
               console.log("Using fallback SQL:", generatedSql);
             }
           }
@@ -445,10 +558,14 @@ ${FEW_SHOT_EXAMPLES}
         });
       }
 
+      const previewJson = JSON.stringify(
+        queryResult.slice(0, 10),
+        (_key, value) => (typeof value === 'bigint' ? Number(value) : value)
+      );
       const summaryPrompt = `
 사용자 질문: "${message}"
 실행된 SQL: "${generatedSql}"
-결과 데이터: ${JSON.stringify(queryResult.slice(0, 10))} ${queryResult.length > 10 ? `(총 ${queryResult.length}건 중 10건 표시)` : `(${queryResult.length}건)`}
+결과 데이터: ${previewJson} ${queryResult.length > 10 ? `(총 ${queryResult.length}건 중 10건 표시)` : `(${queryResult.length}건)`}
 
 작업:
 - 데이터를 기반으로 사용자 질문에 친절하게 한국어로 답변
@@ -468,10 +585,14 @@ ${FEW_SHOT_EXAMPLES}
 
       const answer = summaryCompletion.choices[0]?.message?.content || "결과를 확인해 주세요.";
 
+      const safeData = JSON.parse(
+        JSON.stringify(queryResult, (_key, value) => (typeof value === 'bigint' ? Number(value) : value))
+      );
+
       res.json({
         answer,
         sql: generatedSql,
-        data: queryResult,
+        data: safeData,
       });
 
     } catch (err) {

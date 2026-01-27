@@ -363,8 +363,8 @@ export default function Home() {
   const datasetQueries = sampleQuestionsData?.datasetQuestions || [];
 
   const renderChatContent = () => (
-    <div className="flex-1 flex flex-col relative">
-      <div className="flex-1 px-2 sm:px-4 py-4 sm:py-8 overflow-y-auto">
+    <div className="flex-1 flex flex-col relative min-h-0">
+      <div className="flex-1 min-h-0 px-2 sm:px-4 py-4 sm:py-8 overflow-y-auto">
         <div className="space-y-4 sm:space-y-8 pb-32 max-w-4xl mx-auto">
           <AnimatePresence mode="popLayout">
             {messages.map((msg) => (
@@ -616,7 +616,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen flex bg-background font-sans">
+    <div className="h-screen overflow-hidden flex bg-background font-sans">
       <FileUploadDialog
         open={isFileDialogOpen}
         onOpenChange={setIsFileDialogOpen}
@@ -639,13 +639,17 @@ export default function Home() {
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
 
-      <div className="flex-1 flex flex-col overflow-hidden lg:ml-0">
+      <div
+        className={`flex-1 flex flex-col overflow-hidden min-h-0 transition-[margin] duration-300 ${
+          isSidebarCollapsed ? 'lg:ml-16' : 'lg:ml-72'
+        }`}
+      >
         <TopNav 
           activeTab={activeTab} 
           onTabChange={setActiveTab}
           onMenuClick={() => setIsSidebarOpen(true)}
         />
-        <main className="flex-1 overflow-hidden flex flex-col">
+        <main className="flex-1 overflow-hidden flex flex-col min-h-0">
           {renderContent()}
         </main>
       </div>

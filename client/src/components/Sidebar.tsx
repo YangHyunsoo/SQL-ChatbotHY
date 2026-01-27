@@ -75,7 +75,7 @@ export function Sidebar({
       )}
       
       <div className={`
-        fixed lg:static inset-y-0 left-0 z-50
+        fixed inset-y-0 left-0 z-50
         ${sidebarWidth} h-screen bg-card border-r border-border flex flex-col
         transform transition-all duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
