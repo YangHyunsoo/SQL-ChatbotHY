@@ -22,6 +22,46 @@ const openai = new OpenAI({
 
 const MODEL = "mistralai/devstral-2512:free";
 
+async function generateText({
+  systemPrompt,
+  userPrompt,
+  temperature = 0,
+  maxTokens = 256,
+}: {
+  systemPrompt: string;
+  userPrompt: string;
+  temperature?: number;
+  maxTokens?: number;
+}): Promise<string> {
+  if (ollamaService.isOllamaEnabled()) {
+    const model = ragService.getOllamaModel();
+    const result = await ollamaService.generateWithOllama(
+      model,
+      userPrompt,
+      systemPrompt,
+      { temperature, maxTokens }
+    );
+    if (result.response) {
+      return result.response;
+    }
+    if (result.error) {
+      throw new Error(`Ollama error: ${result.error}`);
+    }
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature,
+    max_tokens: maxTokens,
+  });
+
+  return completion.choices[0]?.message?.content || "";
+}
+
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
@@ -101,6 +141,21 @@ function isDatasetQuestion(message: string, datasetNames: string[]): boolean {
     const escaped = escapeRegExp(name.toLowerCase());
     return new RegExp(`\\b${escaped}\\b`, 'i').test(lowered) || lowered.includes(name.toLowerCase());
   });
+}
+
+function needsClarification(message: string, datasetNames: string[]): boolean {
+  if (!datasetNames.length) return false;
+  const lowered = message.toLowerCase();
+  const datasetHints = ['dataset', '데이터셋', 'csv', '업로드', '엑셀', '스프레드시트'];
+  if (datasetHints.some(hint => lowered.includes(hint))) return false;
+  if (datasetNames.some(name => name && lowered.includes(name.toLowerCase()))) return false;
+  const generalHints = [
+    '날씨', 'weather', '뉴스', 'news', '번역', 'translate', '정의', 'define', '설명', 'explain',
+    '요약', 'summarize', '추천', 'recommend', '조언', 'advice', '방법', 'how to', '법률', '법',
+    '의학', '병', '진단', '투자', '주식', '코인'
+  ];
+  if (generalHints.some(hint => lowered.includes(hint))) return true;
+  return false;
 }
 
 function pickDuckdbTableFromSql(sqlText: string, duckdbTables: string[]): string | null {
@@ -309,21 +364,19 @@ Rules:
 1. Output ONLY the corrected SQL query
 2. No explanations, no markdown
 3. Ensure the query is valid ${dialect === 'duckdb' ? 'DuckDB' : 'PostgreSQL'}
+4. Use a single SELECT only (no multiple statements)
 
 Fixed SQL:`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: "system", content: `You are a SQL expert. Output only valid ${dialect === 'duckdb' ? 'DuckDB' : 'PostgreSQL'} queries.` },
-        { role: "user", content: fixPrompt },
-      ],
+    const fixedSqlRaw = await generateText({
+      systemPrompt: `You are a SQL expert. Output only valid ${dialect === 'duckdb' ? 'DuckDB' : 'PostgreSQL'} queries.`,
+      userPrompt: fixPrompt,
       temperature: 0,
-      max_tokens: 256,
+      maxTokens: 256,
     });
 
-    let fixedSql = completion.choices[0]?.message?.content || "";
+    let fixedSql = fixedSqlRaw || "";
     fixedSql = fixedSql.replace(/```sql/gi, "").replace(/```/g, "").trim();
     const sqlMatch = fixedSql.match(/SELECT[\s\S]*?(?:;|$)/i);
     if (sqlMatch) {
@@ -338,11 +391,88 @@ Fixed SQL:`;
 
 function cleanSql(rawSql: string): string {
   let cleaned = rawSql.replace(/```sql/gi, "").replace(/```/g, "").trim();
-  const sqlMatch = cleaned.match(/SELECT[\s\S]*?(?:;|$)/i);
-  if (sqlMatch) {
-    cleaned = sqlMatch[0].replace(/;$/, '');
+  const lower = cleaned.toLowerCase();
+  const firstSelect = lower.indexOf('select');
+  if (firstSelect >= 0) {
+    let parenDepth = 0;
+    let inSingle = false;
+    let inDouble = false;
+    for (let i = firstSelect + 6; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      if (ch === "'" && !inDouble) inSingle = !inSingle;
+      if (ch === '"' && !inSingle) inDouble = !inDouble;
+      if (inSingle || inDouble) continue;
+      if (ch === '(') parenDepth++;
+      if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
+      if (parenDepth === 0) {
+        if (cleaned[i] === ';') {
+          cleaned = cleaned.slice(firstSelect, i).trim();
+          return cleaned;
+        }
+        if (cleaned.slice(i).toLowerCase().startsWith('select')) {
+          cleaned = cleaned.slice(firstSelect, i).trim();
+          return cleaned;
+        }
+      }
+    }
+    cleaned = cleaned.slice(firstSelect).trim();
   }
   return cleaned;
+}
+
+function hasMultipleTopLevelSelects(sqlText: string): boolean {
+  const lower = sqlText.toLowerCase();
+  let count = 0;
+  let parenDepth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < lower.length; i++) {
+    const ch = lower[i];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    if (ch === '"' && !inSingle) inDouble = !inDouble;
+    if (inSingle || inDouble) continue;
+    if (ch === '(') parenDepth++;
+    if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
+    if (parenDepth === 0 && lower.startsWith('select', i)) {
+      count += 1;
+      if (count > 1) return true;
+    }
+  }
+  return false;
+}
+
+function formatNumberKR(value: number): string {
+  const abs = Math.abs(value);
+  if (abs < 100000) {
+    return Math.round(value).toLocaleString('ko-KR');
+  }
+  if (abs < 100000000) {
+    const man = value / 10000;
+    const rounded = Math.round(man * 10) / 10;
+    return `${rounded.toLocaleString('ko-KR')}만`;
+  }
+  const eok = value / 100000000;
+  const rounded = Math.round(eok * 10) / 10;
+  return `${rounded.toLocaleString('ko-KR')}억`;
+}
+
+function formatNumbersInText(text: string): string {
+  return text.replace(/\b\d+(?:\.\d+)?\b/g, (match) => {
+    const num = Number(match.replace(/,/g, ''));
+    if (Number.isNaN(num)) return match;
+    return formatNumberKR(num);
+  });
+}
+
+function applyRowLimit(sqlText: string, maxRows: number): string {
+  const lower = sqlText.toLowerCase();
+  const limitMatch = lower.match(/\blimit\s+(\d+)/);
+  if (!limitMatch) {
+    return `${sqlText} LIMIT ${maxRows}`;
+  }
+  const current = Number(limitMatch[1]);
+  if (Number.isNaN(current) || current <= maxRows) return sqlText;
+  return sqlText.replace(/\blimit\s+\d+/i, `LIMIT ${maxRows}`);
 }
 
 function getFallbackSql(message: string): string {
@@ -440,7 +570,22 @@ export async function registerRoutes(
       // Build dynamic schema including uploaded datasets
       const { schema: dynamicSchema, duckdbTables, datasetNames } = await buildDynamicSchema();
       const datasetQuestion = isDatasetQuestion(message, datasetNames);
-      if (!datasetQuestion) {
+      const hasDatasets = datasetNames.length > 0;
+      const shouldAskClarification = hasDatasets && !datasetQuestion && needsClarification(message, datasetNames);
+
+      if (shouldAskClarification) {
+        const datasetList = datasetNames.slice(0, 5).join(', ');
+        const answer = datasetNames.length > 5
+          ? `이 질문이 업로드한 데이터셋 관련인가요? 관련 데이터셋을 알려주세요. (예: ${datasetList} 등)`
+          : `이 질문이 업로드한 데이터셋 관련인가요? 관련 데이터셋을 알려주세요. (예: ${datasetList})`;
+        return res.json({
+          answer,
+          sql: '',
+          data: [],
+        });
+      }
+
+      if (!hasDatasets && !datasetQuestion) {
         const generalPrompt = `
 사용자 질문: "${message}"
 
@@ -449,15 +594,12 @@ export async function registerRoutes(
 - 데이터 조회, SQL, 테이블 언급 금지
 - 간결하고 친절하게 답변
 `;
-        const generalCompletion = await openai.chat.completions.create({
-          model: MODEL,
-          messages: [
-            { role: "system", content: "당신은 친절한 일반 지식 어시스턴트입니다. 짧고 명확하게 답변하세요." },
-            { role: "user", content: generalPrompt },
-          ],
-          max_tokens: 512,
-        });
-        const answer = generalCompletion.choices[0]?.message?.content || "도움이 필요하시면 조금 더 자세히 질문해 주세요.";
+        const answer = await generateText({
+          systemPrompt: "당신은 친절한 일반 지식 어시스턴트입니다. 짧고 명확하게 답변하세요.",
+          userPrompt: generalPrompt,
+          temperature: 0.2,
+          maxTokens: 512,
+        }) || "도움이 필요하시면 조금 더 자세히 질문해 주세요.";
         return res.json({
           answer,
           sql: '',
@@ -479,25 +621,70 @@ ${FEW_SHOT_EXAMPLES}
 5. JOIN 필요 시 올바른 FK 관계 사용: sales.product_id = products.id
 6. 집계 함수 사용 시 적절한 GROUP BY 포함
 7. DuckDB 테이블은 data->>'컬럼명' 같은 JSON 접근을 사용하지 마세요.
+8. 반드시 단일 SELECT만 작성하세요. 여러 SELECT/다중 쿼리는 금지입니다.
+9. 비교가 필요하면 GROUP BY 또는 조건 집계로 한 쿼리에서 해결하세요.
 `;
 
-      const completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message },
-        ],
+      const generatedSqlRaw = await generateText({
+        systemPrompt,
+        userPrompt: message,
         temperature: 0,
-        max_tokens: 256,
+        maxTokens: 256,
       });
 
-      let generatedSql = cleanSql(completion.choices[0]?.message?.content || "");
+      let generatedSql = cleanSql(generatedSqlRaw || "");
       console.log("Generated SQL:", generatedSql);
+      let usedSampleFallback = false;
+
+      const prefersCount = (() => {
+        const lowered = message.toLowerCase();
+        return lowered.includes('count') || lowered.includes('몇') || lowered.includes('수') || lowered.includes('총')
+          || lowered.includes('개수') || lowered.includes('건수');
+      })();
+
+      if (datasetQuestion && duckdbTables.length > 0 && !pickDuckdbTableFromSql(generatedSql, duckdbTables)) {
+        const targetTable = duckdbTables[0];
+        generatedSql = prefersCount
+          ? `SELECT COUNT(*) AS total_count FROM "${targetTable}"`
+          : `SELECT * FROM "${targetTable}" LIMIT 10`;
+        if (!prefersCount) {
+          usedSampleFallback = true;
+        }
+        console.log("Adjusted SQL to dataset table:", generatedSql);
+      }
+
+      if (hasMultipleTopLevelSelects(generatedSql)) {
+        console.log("Detected multiple top-level SELECTs, rewriting to single query.");
+        const rewritePrompt = `
+사용자 질문: "${message}"
+다음 SQL은 다중 SELECT를 포함합니다. 반드시 단일 SELECT로 다시 작성하세요.
+가능하면 GROUP BY 또는 조건 집계를 사용하세요.
+
+SQL:
+${generatedSql}
+
+Database Schema:
+${dynamicSchema}
+
+Rules:
+1. Output ONLY the corrected SQL query
+2. No explanations, no markdown
+3. Single SELECT only
+`;
+        const rewrittenSqlRaw = await generateText({
+          systemPrompt: "You are a SQL expert. Output only a single SELECT query.",
+          userPrompt: rewritePrompt,
+          temperature: 0,
+          maxTokens: 256,
+        });
+        generatedSql = cleanSql(rewrittenSqlRaw || generatedSql);
+      }
 
       if (!generatedSql || !generatedSql.toLowerCase().startsWith('select')) {
         console.log("Invalid SQL, using fallback");
         if (duckdbTables.length === 1) {
           generatedSql = `SELECT * FROM "${duckdbTables[0]}" LIMIT 10`;
+          usedSampleFallback = true;
         } else {
           generatedSql = getFallbackSql(message);
         }
@@ -540,6 +727,7 @@ ${FEW_SHOT_EXAMPLES}
             } else {
               if (duckdbTables.length === 1 && duckdbTable) {
                 generatedSql = `SELECT * FROM "${duckdbTables[0]}" LIMIT 10`;
+                usedSampleFallback = true;
               } else {
                 generatedSql = getFallbackSql(message);
               }
@@ -551,7 +739,7 @@ ${FEW_SHOT_EXAMPLES}
 
       if (lastError) {
         return res.status(200).json({
-          answer: "죄송합니다. 해당 질문에 대한 쿼리를 실행할 수 없습니다. 다른 방식으로 질문해 주시겠어요?",
+          answer: "쿼리 실행에 실패해 계산할 수 없습니다. 조건을 조금 바꿔서 다시 질문해 주세요.",
           sql: generatedSql,
           data: [],
           error: lastError
@@ -569,21 +757,20 @@ ${FEW_SHOT_EXAMPLES}
 
 작업:
 - 데이터를 기반으로 사용자 질문에 친절하게 한국어로 답변
-- 숫자가 있으면 읽기 쉽게 포맷 (예: 1000000 → 100만)
+- 숫자는 제공된 결과 수치를 그대로 사용하고, 임의로 변형하거나 새로운 수치를 만들지 마세요.
+- 숫자 포맷은 서버에서 처리합니다.
 - 데이터가 없으면 "조회된 데이터가 없습니다"라고 안내
 - SQL이나 기술 용어 사용 금지, 결과만 자연스럽게 설명
+${usedSampleFallback ? "- 현재 결과는 참고용 샘플입니다. 평균/비율/합계 등 통계 수치를 계산하거나 단정하지 마세요.\n- 샘플이라는 점을 명확히 언급하고 일반적인 설명만 제공하세요." : ""}
 `;
 
-      const summaryCompletion = await openai.chat.completions.create({
-        model: MODEL,
-        messages: [
-          { role: "system", content: "당신은 친절한 데이터 분석 어시스턴트입니다. 자연스럽고 간결한 한국어로 답변하세요." },
-          { role: "user", content: summaryPrompt },
-        ],
-        max_tokens: 512,
-      });
-
-      const answer = summaryCompletion.choices[0]?.message?.content || "결과를 확인해 주세요.";
+      let answer = await generateText({
+        systemPrompt: "당신은 친절한 데이터 분석 어시스턴트입니다. 자연스럽고 간결한 한국어로 답변하세요.",
+        userPrompt: summaryPrompt,
+        temperature: 0.2,
+        maxTokens: 512,
+      }) || "결과를 확인해 주세요.";
+      answer = formatNumbersInText(answer);
 
       const safeData = JSON.parse(
         JSON.stringify(queryResult, (_key, value) => (typeof value === 'bigint' ? Number(value) : value))
@@ -602,6 +789,51 @@ ${FEW_SHOT_EXAMPLES}
       } else {
         res.status(500).json({ message: "Internal server error" });
       }
+    }
+  });
+
+  app.post("/api/sql-exec", async (req, res) => {
+    try {
+      const sqlInput = z.object({ sql: z.string() }).parse(req.body);
+      const cleanedSql = cleanSql(sqlInput.sql);
+      if (!cleanedSql.toLowerCase().startsWith('select')) {
+        return res.status(400).json({ message: "Only SELECT queries are allowed" });
+      }
+      if (hasMultipleTopLevelSelects(cleanedSql)) {
+        return res.status(400).json({ message: "Only single SELECT queries are allowed" });
+      }
+
+      const MAX_ROWS = 500;
+      const QUERY_TIMEOUT_MS = 5000;
+      const limitedSql = applyRowLimit(cleanedSql, MAX_ROWS);
+
+      const { duckdbTables } = await buildDynamicSchema();
+      const duckdbTable = pickDuckdbTableFromSql(limitedSql, duckdbTables);
+      let rows: any[] = [];
+
+      const runQuery = async () => {
+        if (duckdbTable) {
+          return duckdbService.runQuery(limitedSql);
+        }
+        const result = await db.execute(sql.raw(limitedSql));
+        return result.rows;
+      };
+
+      rows = await Promise.race([
+        runQuery(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("SQL execution timeout")), QUERY_TIMEOUT_MS);
+        })
+      ]);
+
+      const safeData = JSON.parse(
+        JSON.stringify(rows, (_key, value) => (typeof value === 'bigint' ? Number(value) : value))
+      );
+
+      return res.json({ data: safeData });
+    } catch (err) {
+      console.error("SQL exec error:", err);
+      return res.status(500).json({ message: "Failed to execute SQL" });
     }
   });
 

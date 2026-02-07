@@ -79,6 +79,7 @@ export default function Home() {
   const [isFileDialogOpen, setIsFileDialogOpen] = useState(false);
   const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
   const [showChartForMessage, setShowChartForMessage] = useState<Record<string, boolean>>({});
+  const hydratedMessageIdsRef = useRef<Set<string>>(new Set());
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const hasInitialized = useRef(false);
@@ -230,6 +231,43 @@ export default function Home() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, chatMutation.isPending]);
+
+  // Hydrate missing data for historical messages using stored SQL
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+    const pending = messages.filter(msg =>
+      msg.role === 'assistant' &&
+      msg.sql &&
+      (!msg.data || msg.data.length === 0) &&
+      !msg.error &&
+      !hydratedMessageIdsRef.current.has(msg.id)
+    );
+    if (pending.length === 0) return;
+
+    pending.forEach(async (msg) => {
+      hydratedMessageIdsRef.current.add(msg.id);
+      try {
+        const res = await fetch('/api/sql-exec', {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: msg.sql }),
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const payload = await res.json();
+        if (!payload || !Array.isArray(payload.data)) return;
+        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, data: payload.data } : m));
+        setConversationMessages(prev => {
+          const convId = activeConversationId;
+          if (!convId) return prev;
+          const updated = (prev[convId] || []).map(m => m.id === msg.id ? { ...m, data: payload.data } : m);
+          return { ...prev, [convId]: updated };
+        });
+      } catch {
+        // ignore hydration errors
+      }
+    });
+  }, [messages, activeConversationId, activeTab]);
 
   function createNewConversation() {
     // Save current messages to the map before switching
@@ -605,11 +643,23 @@ export default function Home() {
       case 'chat':
         return renderChatContent();
       case 'database':
-        return <DatabasePage refreshKey={datasetRefreshKey} />;
+        return (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <DatabasePage refreshKey={datasetRefreshKey} />
+          </div>
+        );
       case 'knowledge':
-        return <KnowledgeBasePage />;
+        return (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <KnowledgeBasePage />
+          </div>
+        );
       case 'settings':
-        return <SettingsPage settings={settings} onSettingsChange={setSettings} />;
+        return (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <SettingsPage settings={settings} onSettingsChange={setSettings} />
+          </div>
+        );
       default:
         return renderChatContent();
     }
